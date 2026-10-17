@@ -28,7 +28,7 @@ func TestHostileInput(t *testing.T) {
 		start, n := time.Now(), 0
 		err := Speak(c.text, v, func(b []byte) error { n += len(b); return nil })
 		secs := float64(n) / 2 / SampleRate
-		if secs > c.maxSecs || time.Since(start) > 3*time.Second || errors.Is(err, ErrTooLong) != c.tooLong {
+		if secs > c.maxSecs || time.Since(start) > 3*time.Second*raceSlowdown || errors.Is(err, ErrTooLong) != c.tooLong {
 			t.Errorf("%s (%s): %.1f s of audio in %v, err %v", c.name, c.lang, secs, time.Since(start), err)
 		}
 	}

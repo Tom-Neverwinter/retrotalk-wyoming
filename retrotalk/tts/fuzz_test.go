@@ -28,7 +28,7 @@ func FuzzSpeak(f *testing.F) {
 			if n > maxAudio {
 				t.Fatalf("%s: %d bytes exceeds the budget", lang, n)
 			}
-			if d := time.Since(start); d > 5*time.Second {
+			if d := time.Since(start); d > 5*time.Second*raceSlowdown {
 				t.Fatalf("%s: took %v for %d chars", lang, d, len(text))
 			}
 		}
