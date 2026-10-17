@@ -10,7 +10,7 @@
 ![Supports aarch64](https://img.shields.io/badge/aarch64-yes-green)
 ![Supports amd64](https://img.shields.io/badge/amd64-yes-green)
 ![Wyoming protocol](https://img.shields.io/badge/wyoming-TTS%20%2B%20streaming-blue)
-![License](https://img.shields.io/github/license/Tom-Neverwinter/dectalk-wyoming)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 > **🚧 Work in progress.** The Wyoming server is tested against the Python `wyoming`
 > client library, but the full add-on has not yet been built and run on real Home Assistant
