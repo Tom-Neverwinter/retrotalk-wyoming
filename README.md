@@ -13,8 +13,8 @@
 ![Wyoming protocol](https://img.shields.io/badge/wyoming-TTS%20%2B%20streaming-blue)
 [![License](https://img.shields.io/github/license/Tom-Neverwinter/retrotalk-wyoming?cacheSeconds=3600)](LICENSE)
 
-> **🚧 Work in progress.** The engine is new and still being tuned. It's tested end to end with
-> Home Assistant's Wyoming client library in CI, but not yet on a real Home Assistant install.
+> **🚧 Work in progress.** The engine is new and still being tuned. It runs on a Raspberry Pi 4
+> with Home Assistant 2026.10, but the announce blueprint hasn't been tried on real speakers yet.
 > Issues and PRs welcome.
 
 Retrotalk is a local text-to-speech add-on with the robotic charm of 1980s formant
@@ -76,7 +76,10 @@ Run the tests with `cd retrotalk && go test ./...`.
 - [x] Wyoming auto-discovery via the Supervisor
 - [x] Announce blueprint: all / areas / speakers, mute switch, quiet hours, priority, volume
 - [x] CI: amd64 and aarch64 builds, smoke test, prebuilt images
-- [ ] Verified on a Raspberry Pi 4 running Home Assistant
+- [x] Installed on a Raspberry Pi 4 (Home Assistant 2026.10.2): prebuilt image installs in
+  seconds, auto-discovery, all 12 voices, speech generated through `tts.retrotalk`;
+  about 21 MB of memory
+- [ ] Announce blueprint verified on real speakers
 - [ ] Better intelligibility: velar consonants, R vs L, female and child voices
 - [ ] More natural intonation (question and list contours, emphasis)
 - [ ] Other languages (letter-to-sound rules for Spanish and German are fairly regular)
