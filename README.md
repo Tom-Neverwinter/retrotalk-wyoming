@@ -137,7 +137,7 @@ Run the tests with `cd retrotalk && go test ./...`.
 - [x] Hardened against hostile input and misbehaving clients (0.7.1)
 - [x] Installed on a Raspberry Pi 4 with Home Assistant 2026.10.2 (0.6.0): prebuilt image
   installs in seconds, auto-discovery, speech generated through `tts.retrotalk`
-- [ ] Announce blueprint verified on real speakers
+- [x] Announce blueprint verified on a real speaker (Sonos): plays, then restores the previous volume
 - [ ] French: still experimental (about half of words misrecognized)
 - [ ] Hardest remaining sounds: th (heard as f), ch/jh, the -ing ending
 
