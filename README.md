@@ -87,25 +87,38 @@ models. It's understandable, and very retro.
 
 Run the tests with `cd retrotalk && go test ./...`.
 
+## Security and resources
+
+- **Footprint:** a ~3.5 MB image (one static binary, no OS inside); about 18-25 MB of memory
+  idle and ~45 MB under sustained load; synthesis runs about 2,000x faster than real time on a
+  desktop, and 40 s of speech is ready in under a second on a Raspberry Pi 4.
+- **Network:** the Wyoming port is closed to your LAN by default (only Home Assistant connects).
+  At most 32 connections; silent ones are dropped after 10 s, idle streams after 2 minutes, and
+  clients that stop reading after 30 s.
+- **Untrusted text** (messages may come from an LLM or a template) is bounded: words up to 40
+  letters, phrases split after 40 words, sung notes up to 3 s, `[:dial]` up to 64 keys, and
+  10 minutes of audio per message. A crash in one message can't stop the add-on.
+- **Tested by attack:** regression tests for every attack found, fuzz tests (text in every
+  language, phonemic input, the protocol reader), a leak soak, and the race detector in CI.
+
 ## Status / To-do
 
 - [x] Own speech engine: text normalization, CMUdict + letter-to-sound, prosody, formant synthesis
-- [x] Wyoming `describe` / `synthesize` and streaming text in, phrase-by-phrase audio out
-- [x] UI options: default voice, rate, custom voices
-- [x] Wyoming auto-discovery via the Supervisor
-- [x] Announce blueprint: all / areas / speakers, mute switch, quiet hours, priority, volume
-- [x] CI: amd64 and aarch64 builds, smoke test, prebuilt images
-- [x] Installed on a Raspberry Pi 4 (Home Assistant 2026.10.2): prebuilt image installs in
-  seconds, auto-discovery, all 12 voices, speech generated through `tts.retrotalk`;
-  about 21 MB of memory
-- [ ] Announce blueprint verified on real speakers
 - [x] Engine constants tuned automatically against speech recognizers (held-out checked)
-- [x] Velar consonants and R vs L (now among the clearest sounds); female and child voices
-  as clear as male
+- [x] Velar consonants and R vs L; female and child voices as clear as male
 - [x] Intonation: yes/no questions rise, wh-questions fall, list continuations, downstep,
   livelier exclamations, `*emphasis*`
 - [x] Languages: UK English, Spanish x2, German, French; character voices; DECtalk-style
   commands, phonemes and singing; pronunciations; 26 voice settings
+- [x] Wyoming `describe` / `synthesize` and streaming text in, phrase-by-phrase audio out
+- [x] UI options: default voice, rate, languages, custom voices, pronunciations
+- [x] Wyoming auto-discovery via the Supervisor
+- [x] Announce blueprint: all / areas / speakers, mute switch, quiet hours, priority, volume
+- [x] CI: lint, race detector, fuzzing, amd64 and aarch64 builds, smoke test, prebuilt images
+- [x] Hardened against hostile input and misbehaving clients (0.7.1)
+- [x] Installed on a Raspberry Pi 4 with Home Assistant 2026.10.2 (0.6.0): prebuilt image
+  installs in seconds, auto-discovery, speech generated through `tts.retrotalk`
+- [ ] Announce blueprint verified on real speakers
 - [ ] French: still experimental (about half of words misrecognized)
 - [ ] Hardest remaining sounds: th (heard as f), ch/jh, the -ing ending
 
