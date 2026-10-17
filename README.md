@@ -1,5 +1,17 @@
 # DECtalk TTS for Home Assistant
 
+<img src="dectalk/logo.png" alt="DECtalk TTS logo" width="250">
+
+[![Add repository to Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FTom-Neverwinter%2Fdectalk-wyoming)
+[![Import announce blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FTom-Neverwinter%2Fdectalk-wyoming%2Fblob%2Fmain%2Fblueprints%2Fscript%2Fdectalk_announce.yaml)
+
+![Version](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fraw.githubusercontent.com%2FTom-Neverwinter%2Fdectalk-wyoming%2Fmain%2Fdectalk%2Fconfig.yaml&query=%24.version&label=version)
+![Project stage: experimental](https://img.shields.io/badge/project%20stage-experimental-orange)
+![Supports aarch64](https://img.shields.io/badge/aarch64-yes-green)
+![Supports amd64](https://img.shields.io/badge/amd64-yes-green)
+![Wyoming protocol](https://img.shields.io/badge/wyoming-TTS%20%2B%20streaming-blue)
+![License](https://img.shields.io/github/license/Tom-Neverwinter/dectalk-wyoming)
+
 > **🚧 Work in progress.** The Wyoming server is tested against the Python `wyoming`
 > client library, but the full add-on has not yet been built and run on real Home Assistant
 > hardware. Expect rough edges. Issues and PRs welcome.
@@ -18,7 +30,8 @@ server. No cloud, no internet needed once installed.
 
 ## Install
 
-1. In Home Assistant, go to **Settings → Add-ons → Add-on Store → ⋮ → Repositories** and add:
+1. Click the **Add repository** button above, or in Home Assistant go to
+   **Settings → Add-ons → Add-on Store → ⋮ → Repositories** and add:
    `https://github.com/Tom-Neverwinter/dectalk-wyoming`
 2. Install **DECtalk TTS** and start it. The first install compiles DECtalk from source on
    your device, so it can take several minutes on a Raspberry Pi.
