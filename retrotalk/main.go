@@ -1,4 +1,4 @@
-// Wyoming TTS server that streams audio from DECtalk's `say`.
+// Wyoming TTS server for the in-process formant speech engine in ./tts.
 package main
 
 import (
@@ -13,49 +13,29 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"slices"
-	"sync"
+	"sort"
 	"time"
+
+	"github.com/Tom-Neverwinter/retrotalk-wyoming/tts"
 )
 
 const (
-	maxDataLength = 1 << 20  // client-supplied JSON is tiny; refuse anything absurd
-	maxHeaderLine = 64 << 10 // bufio buffer size = longest header line accepted
-	maxSession    = 5 * time.Minute
-
-	// say's default encoding (-e 1): 16-bit mono 11025 Hz, host byte order (little-endian on amd64/aarch64).
-	sampleRate, sampleWidth, sampleChannels = 11025, 2, 1
+	maxDataLength = 1 << 20            // client-supplied JSON is tiny; refuse anything absurd
+	maxHeaderLine = 64 << 10           // bufio buffer size = longest header line accepted
+	chunkBytes    = tts.SampleRate * 2 // send audio in chunks of at most 1 s
 )
 
-var (
-	dist     = envOr("DECTALK_DIR", "/dectalk")
-	builtins = []string{"paul", "betty", "harry", "frank", "dennis", "kit", "ursula", "rita", "wendy"}
-	format   = map[string]int{"rate": sampleRate, "width": sampleWidth, "channels": sampleChannels}
-	// DECtalk language codes (say -l) and the language tags Home Assistant groups voices by.
-	languages = map[string]string{"us": "en-US", "uk": "en-GB", "gr": "de-DE", "sp": "es-ES", "la": "es-419", "fr": "fr-FR"}
-)
+var format = map[string]int{"rate": tts.SampleRate, "width": 2, "channels": 1}
 
-// voice is a DECtalk speaker: a built-in base voice plus optional [:dv] tweaks, rate and language.
+// voice is a named speaker: a built-in preset plus optional settings and rate.
 type voice struct {
 	Name     string `json:"name"`
 	Base     string `json:"base"`
 	Settings string `json:"settings"`
 	Rate     int    `json:"rate"`
-	Language string `json:"language"`
 	desc     string
-}
-
-// prefix is the DECtalk command string that selects this voice.
-func (v voice) prefix() string {
-	p := "[:name " + v.Base + "]"
-	if v.Settings != "" {
-		p += "[:dv " + v.Settings + "]"
-	}
-	if v.Rate > 0 {
-		p += fmt.Sprintf("[:rate %d]", v.Rate)
-	}
-	return p + " "
+	tts      tts.Voice
 }
 
 func envOr(key, def string) string {
@@ -65,16 +45,14 @@ func envOr(key, def string) string {
 	return def
 }
 
-// loadVoices reads the add-on options. Built-ins are listed for each enabled language
-// ("paul", "paul_gr", ...); custom voices with an existing name replace it.
+// loadVoices reads the add-on options. Custom voices with a built-in's name replace it.
 // A missing file (running outside Home Assistant) means defaults.
 func loadVoices(path string) ([]voice, voice, error) {
 	o := struct {
-		Voice        string   `json:"voice"`
-		Rate         int      `json:"rate"`
-		Languages    []string `json:"languages"`
-		CustomVoices []voice  `json:"custom_voices"`
-	}{Voice: "paul", Languages: []string{"us"}}
+		Voice        string  `json:"voice"`
+		Rate         int     `json:"rate"`
+		CustomVoices []voice `json:"custom_voices"`
+	}{Voice: "paul"}
 	b, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		b, err = []byte("{}"), nil
@@ -85,34 +63,34 @@ func loadVoices(path string) ([]voice, voice, error) {
 	if err := json.Unmarshal(b, &o); err != nil {
 		return nil, voice{}, fmt.Errorf("%s: %w", path, err)
 	}
-	vs := make([]voice, 0, len(o.Languages)*len(builtins)+len(o.CustomVoices))
-	for _, l := range o.Languages {
-		if _, ok := languages[l]; !ok {
-			return nil, voice{}, fmt.Errorf("unknown language %q", l)
-		}
-		for _, n := range builtins {
-			name := n
-			if l != "us" {
-				name += "_" + l
-			}
-			vs = append(vs, voice{Name: name, Base: n, Rate: o.Rate, Language: l, desc: n})
-		}
+	names := make([]string, 0, len(tts.Presets))
+	for n := range tts.Presets {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	var vs []voice
+	for _, n := range names {
+		vs = append(vs, voice{Name: n, Base: n, desc: n})
 	}
 	for _, c := range o.CustomVoices {
-		if c.Rate == 0 {
-			c.Rate = o.Rate
-		}
-		if c.Language == "" {
-			c.Language = "us"
-		}
-		if _, ok := languages[c.Language]; !ok {
-			return nil, voice{}, fmt.Errorf("custom voice %q: unknown language %q", c.Name, c.Language)
-		}
 		c.desc = fmt.Sprintf("%s (%s %s)", c.Name, c.Base, c.Settings)
 		if i := slices.IndexFunc(vs, func(v voice) bool { return v.Name == c.Name }); i >= 0 {
 			vs[i] = c
 		} else {
 			vs = append(vs, c)
+		}
+	}
+	for i := range vs {
+		v := &vs[i]
+		base, ok := tts.Presets[v.Base]
+		if !ok {
+			return nil, voice{}, fmt.Errorf("voice %q: unknown base voice %q", v.Name, v.Base)
+		}
+		if v.tts, err = base.With(v.Settings); err != nil {
+			return nil, voice{}, fmt.Errorf("voice %q: %w", v.Name, err)
+		}
+		if rate := cmp(v.Rate, o.Rate); rate > 0 {
+			v.tts.Rate = float64(rate)
 		}
 	}
 	i := slices.IndexFunc(vs, func(v voice) bool { return v.Name == o.Voice })
@@ -122,17 +100,25 @@ func loadVoices(path string) ([]voice, voice, error) {
 	return vs, vs[i], nil
 }
 
+// cmp returns the first non-zero value.
+func cmp(a, b int) int {
+	if a != 0 {
+		return a
+	}
+	return b
+}
+
 func info(vs []voice) map[string]any {
-	attr := map[string]string{"name": "DECtalk", "url": "https://github.com/dectalk/dectalk"}
+	attr := map[string]string{"name": "Retrotalk", "url": "https://github.com/Tom-Neverwinter/retrotalk-wyoming"}
 	tv := make([]map[string]any, len(vs))
 	for i, v := range vs {
 		tv[i] = map[string]any{"name": v.Name, "description": v.desc, "attribution": attr,
-			"installed": true, "version": "4.61", "languages": []string{languages[v.Language]}}
+			"installed": true, "version": "1", "languages": []string{"en-US"}}
 	}
 	none := []any{}
 	return map[string]any{
-		"tts": []any{map[string]any{"name": "dectalk", "description": "DECtalk", "attribution": attr,
-			"installed": true, "version": "4.61", "voices": tv, "supports_synthesize_streaming": true}},
+		"tts": []any{map[string]any{"name": "retrotalk", "description": "Retrotalk formant speech synthesizer", "attribution": attr,
+			"installed": true, "version": "1", "voices": tv, "supports_synthesize_streaming": true}},
 		"asr": none, "handle": none, "intent": none, "wake": none, "mic": none, "snd": none,
 	}
 }
@@ -188,117 +174,34 @@ func writeEvent(w *bufio.Writer, typ string, data any, payload []byte) {
 	w.Write(payload)
 }
 
-// conn serializes writes: during a stream the audio pump writes while the handler reads.
 type conn struct {
-	mu sync.Mutex
-	w  *bufio.Writer
+	w       *bufio.Writer
+	started bool // audio-start sent for the current message
 }
 
 func (c *conn) send(typ string, data any, payload []byte) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	writeEvent(c.w, typ, data, payload)
 	return c.w.Flush()
 }
 
-func (c *conn) fail(err error) error {
-	c.send("error", map[string]string{"text": err.Error(), "code": "synthesis-failed"}, nil)
-	return err
-}
-
-// session is one running `say`: text goes in on stdin, raw PCM streams out of stdout.
-// ponytail: one process per message; link libtts via cgo if spawn cost ever matters.
-type session struct {
-	cmd   *exec.Cmd
-	stdin io.WriteCloser
-	done  chan error
-}
-
-func (c *conn) start(v voice) (*session, error) {
-	// -c: clause mode, DECtalk speaks each clause as soon as it's complete. "-" must be last.
-	args := []string{"-c", "-fo", "stdout:raw"}
-	if v.Language != "" && v.Language != "us" {
-		args = append(args, "-l", v.Language)
-	}
-	cmd := exec.Command("./say", append(args, "-")...)
-	cmd.Dir = dist
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, err
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("say: %w", err)
-	}
-	s := &session{cmd: cmd, stdin: stdin, done: make(chan error, 1)}
-	watchdog := time.AfterFunc(maxSession, func() { cmd.Process.Kill() }) // a hung say must not pin the connection
-	go func() {
-		err := c.pump(stdout)
-		if err != nil {
-			cmd.Process.Kill() // client is gone; don't let say block on a full pipe
-		}
-		werr := cmd.Wait()
-		watchdog.Stop()
-		if werr != nil && err == nil {
-			err = fmt.Errorf("say: %w: %s", werr, bytes.TrimSpace(stderr.Bytes()))
-		}
-		s.done <- err
-	}()
-	if _, err := io.WriteString(stdin, v.prefix()); err != nil {
-		s.kill()
-		return nil, err
-	}
-	return s, nil
-}
-
-// pump relays PCM as say produces it, keeping chunks sample-aligned.
-func (c *conn) pump(stdout io.Reader) error {
-	buf := make([]byte, 8192)
-	started, carry := false, 0
-	for {
-		n, rerr := stdout.Read(buf[carry:])
-		n += carry
-		if even := n &^ (sampleWidth - 1); even > 0 {
-			if !started {
-				if err := c.send("audio-start", format, nil); err != nil {
-					return err
-				}
-				started = true
-			}
-			if err := c.send("audio-chunk", format, buf[:even]); err != nil {
+// speak synthesizes text and streams it phrase by phrase, opening with audio-start once.
+func (c *conn) speak(text string, v voice) error {
+	return tts.Speak(text, v.tts, func(pcm []byte) error {
+		if !c.started {
+			if err := c.send("audio-start", format, nil); err != nil {
 				return err
 			}
-			carry = copy(buf, buf[even:n])
-		} else {
-			carry = n
+			c.started = true
 		}
-		if rerr == io.EOF {
-			return nil
+		for len(pcm) > 0 {
+			n := min(len(pcm), chunkBytes)
+			if err := c.send("audio-chunk", format, pcm[:n]); err != nil {
+				return err
+			}
+			pcm = pcm[n:]
 		}
-		if rerr != nil {
-			return rerr
-		}
-	}
-}
-
-// finish closes the text input, waits for the audio to drain and ends it.
-func (c *conn) finish(s *session) error {
-	s.stdin.Close()
-	if err := <-s.done; err != nil {
-		return c.fail(err)
-	}
-	return c.send("audio-stop", map[string]any{}, nil)
-}
-
-func (s *session) kill() {
-	s.cmd.Process.Kill()
-	s.stdin.Close()
-	<-s.done
+		return nil
+	})
 }
 
 type server struct {
@@ -334,15 +237,11 @@ func (s *server) voice(req synthReq) voice {
 }
 
 func (s *server) handle(nc net.Conn) {
+	defer nc.Close()
 	c := &conn{w: bufio.NewWriter(nc)}
 	r := bufio.NewReaderSize(nc, maxHeaderLine)
-	var stream *session // set between synthesize-start and synthesize-stop
-	defer func() {
-		nc.Close()
-		if stream != nil {
-			stream.kill()
-		}
-	}()
+	var stream *voice  // set between synthesize-start and synthesize-stop
+	var pending string // streamed text not yet ending a phrase
 	for {
 		typ, data, err := readEvent(r)
 		if err == nil {
@@ -355,32 +254,29 @@ func (s *server) handle(nc net.Conn) {
 					break // inside a stream this is only a compatibility copy of the chunks
 				}
 				if req, err = decode(data); err == nil {
-					var one *session
-					if one, err = c.start(s.voice(req)); err != nil {
-						err = c.fail(err)
-					} else if _, err = io.WriteString(one.stdin, req.Text); err != nil {
-						one.kill()
-					} else {
-						err = c.finish(one)
+					c.started = false
+					if err = c.speak(req.Text, s.voice(req)); err == nil {
+						err = c.send("audio-stop", map[string]any{}, nil)
 					}
 				}
 			case "synthesize-start":
-				if stream != nil {
-					stream.kill()
-				}
 				if req, err = decode(data); err == nil {
-					if stream, err = c.start(s.voice(req)); err != nil {
-						err = c.fail(err)
-					}
+					v := s.voice(req)
+					stream, pending, c.started = &v, "", false
 				}
 			case "synthesize-chunk":
 				if req, err = decode(data); err == nil && stream != nil {
-					_, err = io.WriteString(stream.stdin, req.Text)
+					// Speak each completed phrase as soon as it arrives.
+					var done string
+					done, pending = tts.SplitPhrases(pending + req.Text)
+					err = c.speak(done, *stream)
 				}
 			case "synthesize-stop":
 				if stream != nil {
-					err = c.finish(stream)
-					stream = nil
+					if err = c.speak(pending, *stream); err == nil {
+						err = c.send("audio-stop", map[string]any{}, nil)
+					}
+					stream, pending = nil, ""
 				}
 				if err == nil {
 					err = c.send("synthesize-stopped", map[string]any{}, nil)
@@ -426,13 +322,14 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	tts.LoadDictionary()
 	s := &server{voices: vs, def: def, info: info(vs)}
 	port := envOr("PORT", "10205")
 	ln, err := net.Listen("tcp", ":"+port)
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("DECtalk Wyoming server on %s, %d voices, default %q", ln.Addr(), len(vs), def.Name)
+	log.Printf("Wyoming TTS server on %s, %d voices, default %q", ln.Addr(), len(vs), def.Name)
 	go discover(port)
 	for {
 		c, err := ln.Accept()

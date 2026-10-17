@@ -1,66 +1,50 @@
-# DECtalk TTS
+# Retrotalk TTS
 
-> 🚧 Work in progress. See the [repository](https://github.com/Tom-Neverwinter/dectalk-wyoming)
+> 🚧 Work in progress. See the [repository](https://github.com/Tom-Neverwinter/retrotalk-wyoming)
 > for status.
+
+Retrotalk is a local, retro-sounding text-to-speech engine in the style of 1980s formant
+synthesizers. It runs entirely on your Home Assistant machine, with no cloud and no internet.
+English only for now.
 
 ## Setup
 
-1. Start the add-on. The first install compiles DECtalk, which takes several minutes on a Pi.
+1. Start the add-on.
 2. Home Assistant should show **Wyoming Protocol** under **Settings → Devices & services →
    Discovered**. Click **Configure**.
    - Not discovered? Add **Wyoming Protocol** manually with the **Hostname** shown on this
      add-on's Info tab and port `10205`.
-3. Pick DECtalk in **Settings → Voice assistants**, or use the `tts.speak` action.
+3. Pick Retrotalk in **Settings → Voice assistants**, or use the `tts.speak` action.
 
 ## Options
 
 | Option | What it does |
 |---|---|
 | **Default voice** | Voice used when a request doesn't name one. Any built-in or custom voice name. |
-| **Speaking rate** | Words per minute for all voices (75-600). Unset = DECtalk default. |
-| **Languages** | Which languages get the 9 built-in voices (see [Languages](#languages)). Default: US English. |
+| **Speaking rate** | Words per minute for all voices (75-600). Unset = each voice's own rate. |
 | **Custom voices** | Your own voices (below). They show up in Home Assistant's voice pickers. |
 
 Restart the add-on after changing options, then **reload** the Wyoming integration so
 Home Assistant sees new voices.
 
-## Languages
-
-DECtalk speaks six languages. Enable the ones you want under **Languages**; each adds the
-9 built-in voices for that language.
-
-| Code | Language | Voice names | Home Assistant language |
-|---|---|---|---|
-| `us` | English (US) | `paul`, `betty`, ... | en-US |
-| `uk` | English (UK) | `paul_uk`, `betty_uk`, ... | en-GB |
-| `gr` | German | `paul_gr`, ... | de-DE |
-| `sp` | Spanish (Spain) | `paul_sp`, ... | es-ES |
-| `la` | Spanish (Latin America) | `paul_la`, ... | es-419 |
-| `fr` | French | `paul_fr`, ... | fr-FR |
-
-Home Assistant lists each voice under its language. Pick a voice in your voice assistant
-or `tts.speak`, because Home Assistant does not tell the add-on which language you want;
-without a voice it uses the **Default voice**. Custom voices take an optional `language`
-(default `us`).
-
 ## Built-in voices
 
 | Voice | Sounds like |
 |---|---|
-| `paul` | Perfect Paul: the classic default male voice |
-| `harry` | Huge Harry: large, deep male |
-| `frank` | Frail Frank: older male |
-| `dennis` | Doctor Dennis: softer male |
-| `betty` | Beautiful Betty: default female |
-| `ursula` | Uppity Ursula: assertive female |
-| `rita` | Rough Rita: gravelly female |
-| `wendy` | Whispering Wendy: breathy female |
-| `kit` | Kit the Kid: child |
+| `paul` | Standard adult male |
+| `harry` | Large, deep male |
+| `frank` | Older male, a little breathy and creaky |
+| `dennis` | Softer, breathier male |
+| `betty` | Standard adult female |
+| `ursula` | Assertive, bright female |
+| `rita` | Gravelly female |
+| `wendy` | Whispery female |
+| `kit` | Child |
 
 ## Bundled custom voices
 
 These ship as defaults in **Custom voices**, so you can edit or delete them there.
-They are DECtalk *impressions* of famous fictional AI voices, not recordings or clones.
+They are *impressions* of famous fictional AI voices, not recordings or clones.
 
 | Voice | Inspired by | How it's tuned |
 |---|---|---|
@@ -73,8 +57,8 @@ the list below or use **⋮ → Reset to defaults** on the Configuration tab.
 
 ## Making more voices
 
-A custom voice is a **base** voice plus DECtalk **design-voice** settings, written as
-`code value` pairs separated by spaces (lowercase letters, digits and spaces only):
+A custom voice is a **base** voice plus **settings**, written as `code value` pairs separated
+by spaces:
 
 ```yaml
 custom_voices:
@@ -91,64 +75,54 @@ custom_voices:
     settings: pr 0 ap 90      # flat pitch
   - name: giant
     base: harry
-    settings: hs 130 ap 60
+    settings: hs 125 ap 70
     rate: 140
   - name: chipmunk
     base: kit
-    settings: hs 75 ap 300
-    rate: 260
+    settings: hs 72 ap 320
+    rate: 240
 ```
 
 - `name` is what you pick in Home Assistant. Reusing a built-in name (e.g. `paul`) replaces it.
-- `rate` (optional) overrides the global speaking rate for this voice.
+- `rate` (optional) sets this voice's words per minute.
 
-### Design-voice settings
-
-Commonly useful codes. Ranges are approximate; DECtalk clamps out-of-range values.
+### Voice settings
 
 | Code | Setting | Range | Effect |
 |---|---|---|---|
-| `ap` | Average pitch | 50-350 Hz | Higher = higher voice |
+| `ap` | Average pitch | 40-500 Hz | Higher = higher voice |
 | `pr` | Pitch range | 0-250 % | `0` = monotone robot, high = sing-song |
-| `hs` | Head size | 65-145 % | Bigger = deeper, larger-sounding speaker |
-| `sx` | Sex | 0 or 1 | 0 = female, 1 = male vocal tract |
-| `br` | Breathiness | 0-72 dB | Adds breath noise |
+| `hs` | Head size | 50-160 % | Bigger = deeper, larger-sounding speaker |
+| `sx` | Vocal tract | 0 or 1 | 0 = female (head size 85), 1 = male (100) |
+| `br` | Breathiness | 0-72 | Adds breath noise; high = whisper |
 | `sm` | Smoothness | 0-100 % | Higher = softer, less buzzy |
 | `ri` | Richness | 0-100 % | Higher = brighter, more carrying |
-| `la` | Laryngealization | 0-100 % | Creaky / gravelly voice |
-| `as` | Assertiveness | 0-100 % | How strongly sentences end |
-| `qu` | Quickness | 0-100 % | How fast pitch changes |
-| `lo` | Loudness | 0-86 dB | Output level |
+| `la` | Laryngealization | 0-100 % | Creaky, gravelly voice |
+| `as` | Assertiveness | 0-100 % | How far statements fall at the end |
+| `qu` | Quickness | 0-100 % | How fast pitch moves |
+| `lo` | Loudness | -30 to 12 dB | Output level |
 
-### Trying settings before saving
+Values outside a range are clamped. Very large head sizes or pitches make speech harder to
+understand.
 
-DECtalk commands work inside the message, so you can audition a voice from
-**Developer tools → Actions** without restarting the add-on:
+## What it reads well
 
-```yaml
-action: tts.speak
-target:
-  entity_id: tts.dectalk
-data:
-  media_player_entity_id: media_player.kitchen
-  message: "[:dv hs 130 ap 60] Fee fi fo fum."
-  options:
-    voice: harry
-```
-
-Copy the `[:dv ...]` contents into `settings` when you like it. Other inline commands:
-`[:rate 250]`, `[:phoneme on]` (for singing), `[:punct all]`.
+Retrotalk expands what Home Assistant usually sends: numbers (`1,250`), decimals, negatives,
+ordinals (`21st`), years (`1984`), times (`7:30 pm`, `19:00`), temperatures (`72°F`),
+percentages, money (`$12.50`), short initialisms spelled out (`TV`, `USB`), common
+abbreviations (`Dr.`, `mph`, `kWh`) and accented letters. Pronunciation comes from the CMU
+Pronouncing Dictionary (about 126,000 words); unknown words fall back to letter-to-sound rules.
 
 ## Announcements: everywhere, by room, or by speaker
 
-Use the **DECtalk announce** script blueprint from the repository:
+Use the **Retrotalk announce** script blueprint from the repository:
 
-[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FTom-Neverwinter%2Fdectalk-wyoming%2Fblob%2Fmain%2Fblueprints%2Fscript%2Fdectalk_announce.yaml)
+[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FTom-Neverwinter%2Fretrotalk-wyoming%2Fblob%2Fmain%2Fblueprints%2Fscript%2Fretrotalk_announce.yaml)
 
 1. Create a label, e.g. **Announcer** (**Settings → Areas, labels & zones → Labels**).
 2. Put that label on **one** media player (or its device) per room: the one that should speak there.
    Other speakers in the room stay quiet.
-3. Create a script from the blueprint, choosing your DECtalk TTS entity and the label.
+3. Create a script from the blueprint, choosing your Retrotalk TTS entity and the label.
    Optional settings:
    - **Mute switch:** an `input_boolean` or `switch`; while it's on, announcements are skipped.
    - **Quiet hours:** start and end time (e.g. 22:00 to 07:00) when announcements are skipped.
@@ -189,7 +163,7 @@ data:
 | `message` | Text to speak (required) |
 | `areas` | Only these rooms' labelled speakers |
 | `speakers` | Exact media players; overrides `areas` and the label |
-| `voice` | DECtalk voice; empty = add-on default |
+| `voice` | Retrotalk voice; empty = add-on default |
 | `volume` | 0-100 for this announcement; the previous volume is restored afterwards |
 | `priority` | Ignore the mute switch and quiet hours |
 
@@ -206,10 +180,7 @@ Home Assistant caches generated speech, so repeating the same message is instant
 
 ## Streaming
 
-Audio is streamed: DECtalk writes raw samples to a pipe and the add-on forwards them as they
-are produced, so playback can start before the whole message is synthesized. Nothing is
-written to disk.
-
-The add-on also accepts **streamed text** (Wyoming `synthesize-start` / `synthesize-chunk`),
-which Home Assistant uses when a voice assistant's LLM is still writing its reply. DECtalk runs
-in clause mode, speaking each clause as soon as it is complete.
+Speech is produced a phrase at a time and sent as soon as each phrase is ready, so playback
+starts almost immediately. Retrotalk also accepts **streamed text** (Wyoming
+`synthesize-start` / `synthesize-chunk`), which Home Assistant uses while a voice
+assistant's LLM is still writing its reply: each finished phrase is spoken right away.

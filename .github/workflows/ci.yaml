@@ -17,12 +17,13 @@ jobs:
       - uses: actions/checkout@v7
       - uses: frenck/action-addon-linter@v2
         with:
-          path: ./dectalk
+          path: ./retrotalk
       - uses: actions/setup-go@v7
         with:
-          go-version-file: dectalk/go.mod
+          go-version-file: retrotalk/go.mod
+          cache-dependency-path: retrotalk/go.mod
       - run: go vet ./... && go test ./...
-        working-directory: dectalk
+        working-directory: retrotalk
 
   build:
     name: Build and smoke test (${{ matrix.arch }})
@@ -34,37 +35,43 @@ jobs:
           - { arch: amd64, runner: ubuntu-24.04 }
           - { arch: aarch64, runner: ubuntu-24.04-arm } # native arm64, no emulation
     runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v7
       - name: Build image
         id: build
         run: |
-          version=$(sed -n 's/^version: "\(.*\)"$/\1/p' dectalk/config.yaml)
-          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ matrix.arch }}-addon-dectalk:$version"
+          version=$(sed -n 's/^version: "\(.*\)"$/\1/p' retrotalk/config.yaml)
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ matrix.arch }}-addon-retrotalk:$version"
           echo "image=$image" >> "$GITHUB_OUTPUT"
           docker build \
             --label io.hass.type=addon \
             --label io.hass.arch=${{ matrix.arch }} \
             --label io.hass.version="$version" \
             --label org.opencontainers.image.source="https://github.com/${{ github.repository }}" \
-            -t "$image" dectalk
+            -t "$image" retrotalk
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - name: Smoke test with real DECtalk
+      - name: Smoke test
         run: |
-          pip install -q wyoming==1.10.2 pyyaml
+          pip install -q wyoming==1.10.2 pyyaml==6.0.3
           python .github/smoke_test.py options > "$RUNNER_TEMP/options.json"
-          docker run -d --name dectalk -p 10205:10205 \
+          docker run -d --name retrotalk -p 10205:10205 \
             -v "$RUNNER_TEMP/options.json:/data/options.json:ro" "${{ steps.build.outputs.image }}"
           python .github/smoke_test.py run smoke-out
       - name: Container log
         if: always()
-        run: docker logs dectalk || true
+        run: docker logs retrotalk || true
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: voices-${{ matrix.arch }}
           path: smoke-out/
-      # ponytail: no image push. DECtalk's LICENCE is proprietary (FONIX, all rights reserved),
-      # so built images aren't published; users build on their device instead.
+      - name: Push to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker push "${{ steps.build.outputs.image }}"

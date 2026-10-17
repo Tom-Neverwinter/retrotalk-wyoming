@@ -1,5 +1,5 @@
 blueprint:
-  name: DECtalk announce
+  name: Retrotalk announce
   description: >-
     Speak a message on one designated speaker per room. Put the chosen label on one
     media player (or its device) in each area. Call with `areas` for specific rooms,
@@ -7,12 +7,12 @@ blueprint:
     switch, quiet hours, a priority override, and a temporary volume that is restored
     afterwards. Announcements queue up and never talk over each other.
   domain: script
-  source_url: https://github.com/Tom-Neverwinter/dectalk-wyoming/blob/main/blueprints/script/dectalk_announce.yaml
+  source_url: https://github.com/Tom-Neverwinter/retrotalk-wyoming/blob/main/blueprints/script/retrotalk_announce.yaml
   homeassistant:
     min_version: 2024.4.0
   input:
     tts_entity:
-      name: DECtalk TTS entity
+      name: Retrotalk TTS entity
       selector:
         entity:
           filter:
@@ -76,7 +76,7 @@ fields:
           domain: media_player
   voice:
     name: Voice
-    description: DECtalk voice name. Leave empty for the add-on's default voice.
+    description: Retrotalk voice name. Leave empty for the add-on's default voice.
     selector:
       text:
   volume:
@@ -132,7 +132,7 @@ variables:
       {% if v is number %}{% set ns.r = ns.r + [{'entity': p, 'level': v}] %}{% endif %}
     {% endfor %}
     {{ ns.r }}
-  # DECtalk speaks roughly 15 characters a second; allow extra for slow speakers.
+  # Speech runs at roughly 15 characters a second; allow extra for slow speakers.
   max_seconds: "{{ 5 + (message | length / 10) | int }}"
 
 sequence:

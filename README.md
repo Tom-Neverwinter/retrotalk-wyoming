@@ -1,84 +1,94 @@
-# DECtalk TTS for Home Assistant
+# Retrotalk TTS for Home Assistant
 
-<img src="dectalk/logo.png" alt="DECtalk TTS logo" width="250">
+<img src="retrotalk/logo.png" alt="Retrotalk logo" width="250">
 
-[![Add repository to Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FTom-Neverwinter%2Fdectalk-wyoming)
-[![Import announce blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FTom-Neverwinter%2Fdectalk-wyoming%2Fblob%2Fmain%2Fblueprints%2Fscript%2Fdectalk_announce.yaml)
+[![Add repository to Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FTom-Neverwinter%2Fretrotalk-wyoming)
+[![Import announce blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FTom-Neverwinter%2Fretrotalk-wyoming%2Fblob%2Fmain%2Fblueprints%2Fscript%2Fretrotalk_announce.yaml)
 
-[![CI](https://github.com/Tom-Neverwinter/dectalk-wyoming/actions/workflows/ci.yaml/badge.svg)](https://github.com/Tom-Neverwinter/dectalk-wyoming/actions/workflows/ci.yaml)
-![Version](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fraw.githubusercontent.com%2FTom-Neverwinter%2Fdectalk-wyoming%2Fmain%2Fdectalk%2Fconfig.yaml&query=%24.version&label=version)
+[![CI](https://github.com/Tom-Neverwinter/retrotalk-wyoming/actions/workflows/ci.yaml/badge.svg)](https://github.com/Tom-Neverwinter/retrotalk-wyoming/actions/workflows/ci.yaml)
+![Version](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fraw.githubusercontent.com%2FTom-Neverwinter%2Fretrotalk-wyoming%2Fmain%2Fretrotalk%2Fconfig.yaml&query=%24.version&label=version)
 ![Project stage: experimental](https://img.shields.io/badge/project%20stage-experimental-orange)
 ![Supports aarch64](https://img.shields.io/badge/aarch64-yes-green)
 ![Supports amd64](https://img.shields.io/badge/amd64-yes-green)
 ![Wyoming protocol](https://img.shields.io/badge/wyoming-TTS%20%2B%20streaming-blue)
-[![License](https://img.shields.io/github/license/Tom-Neverwinter/dectalk-wyoming?cacheSeconds=3600)](LICENSE)
+[![License](https://img.shields.io/github/license/Tom-Neverwinter/retrotalk-wyoming?cacheSeconds=3600)](LICENSE)
 
-> **🚧 Work in progress.** The Wyoming server is tested against the Python `wyoming`
-> client library, but the full add-on has not yet been built and run on real Home Assistant
-> hardware. Expect rough edges. Issues and PRs welcome.
+> **🚧 Work in progress.** The engine is new and still being tuned. It's tested end to end with
+> Home Assistant's Wyoming client library in CI, but not yet on a real Home Assistant install.
+> Issues and PRs welcome.
 
-A Home Assistant add-on that runs the classic [DECtalk](https://github.com/dectalk/dectalk)
-speech synthesizer as a local [Wyoming](https://github.com/rhasspy/wyoming) text-to-speech
-server. No cloud, no internet needed once installed.
+Retrotalk is a local text-to-speech add-on with the robotic charm of 1980s formant
+synthesizers. The speech engine is written from scratch in Go and runs entirely on your Home
+Assistant machine: no cloud, no internet, no external programs.
 
-- 9 built-in DECtalk voices, plus **your own custom voices** set in the add-on's Configuration tab
+- 9 built-in voices, plus **your own custom voices** set in the add-on's Configuration tab
 - Bundled impression voices: `kitt` (default) and `hal`
-- Streaming: audio starts playing before the whole message is synthesized
-- Default voice, speaking rate and languages configurable in the UI
-- 6 languages: US and UK English, German, Spanish (Spain and Latin America), French
+- Streaming: each phrase plays as soon as it's ready; accepts streamed text from voice assistants
+- Reads numbers, times, temperatures, money, percentages and abbreviations naturally
 - Auto-discovered by Home Assistant's Wyoming integration
 - **Announce blueprint:** speak everywhere, in chosen rooms, or on chosen speakers, with one
   designated speaker per room, plus mute switch, quiet hours, priority alerts and volume
+- English only for now
 
 ## Install
 
 1. Click the **Add repository** button above, or in Home Assistant go to
    **Settings → Add-ons → Add-on Store → ⋮ → Repositories** and add:
-   `https://github.com/Tom-Neverwinter/dectalk-wyoming`
-2. Install **DECtalk TTS** and start it. The first install compiles DECtalk from source on
-   your device, so it can take several minutes on a Raspberry Pi.
+   `https://github.com/Tom-Neverwinter/retrotalk-wyoming`
+2. Install **Retrotalk TTS** and start it.
 3. Accept the discovered **Wyoming Protocol** integration under **Settings → Devices & services**.
 
 Full docs (options, making custom voices, announcements) are in
-[`dectalk/DOCS.md`](dectalk/DOCS.md), which is also the add-on's **Documentation** tab.
+[`retrotalk/DOCS.md`](retrotalk/DOCS.md), which is also the add-on's **Documentation** tab.
+
+## How the engine works
+
+| Stage | What it does | Based on |
+|---|---|---|
+| Text normalization | Numbers, times, °F, $, %, ordinals, abbreviations into words | — |
+| Pronunciation | Dictionary lookup, letter-to-sound rules for unknown words | [CMU Pronouncing Dictionary](https://github.com/cmusphinx/cmudict) |
+| Prosody | Segment durations, stress, hat-pattern pitch contour | Klatt's duration rules (Allen, Hunnicutt & Klatt 1987) |
+| Synthesis | Cascade/parallel formant synthesizer, 16 kHz | Klatt (1980); Klatt & Klatt (1990) voicing source |
+
+Intelligibility is measured with Whisper (speech recognition) on 20 Harvard sentences plus
+10 Home Assistant announcements: about **18-32% word error rate** depending on the voice,
+against 2% for a modern commercial voice. It's understandable, and very retro.
 
 ## Repository layout
 
 | Path | What |
 |---|---|
-| `dectalk/main.go` | Wyoming server in Go (stdlib only). Pipes text into DECtalk's `say` and streams its raw PCM back as it's produced. |
-| `dectalk/config.yaml` | Add-on manifest and options schema |
-| `dectalk/translations/en.yaml` | UI labels for the options |
-| `dectalk/Dockerfile` | Builds DECtalk from upstream and checks it can produce a WAV |
-| `blueprints/script/dectalk_announce.yaml` | Room/speaker announcement script blueprint |
-| `.github/workflows/ci.yaml` | Lint, unit tests, then build both architectures and smoke-test real DECtalk (WAVs uploaded as artifacts) |
+| `retrotalk/tts/` | The speech engine (Go, standard library only) |
+| `retrotalk/main.go` | Wyoming server: voices, streaming, Home Assistant discovery |
+| `retrotalk/config.yaml` | Add-on manifest and options schema |
+| `retrotalk/translations/en.yaml` | UI labels for the options |
+| `retrotalk/Dockerfile` | One static binary on an empty base image |
+| `blueprints/script/retrotalk_announce.yaml` | Room/speaker announcement script blueprint |
+| `.github/workflows/ci.yaml` | Lint, unit tests, build both architectures, smoke test with the Wyoming client (WAVs uploaded as artifacts), publish images |
 
-Run the tests with `cd dectalk && go test ./...`.
+Run the tests with `cd retrotalk && go test ./...`.
 
 ## Status / To-do
 
-- [x] Wyoming `describe` / `synthesize`, tested with `wyoming==1.5.4` client
-- [x] Builds for `amd64` and `aarch64` (Go side)
+- [x] Own speech engine: text normalization, CMUdict + letter-to-sound, prosody, formant synthesis
+- [x] Wyoming `describe` / `synthesize` and streaming text in, phrase-by-phrase audio out
 - [x] UI options: default voice, rate, custom voices
 - [x] Wyoming auto-discovery via the Supervisor
-- [x] Announcement blueprint (all / areas / speakers)
-- [x] DECtalk builds and speaks on amd64 and aarch64 (CI smoke test with real DECtalk)
+- [x] Announce blueprint: all / areas / speakers, mute switch, quiet hours, priority, volume
+- [x] CI: amd64 and aarch64 builds, smoke test, prebuilt images
 - [ ] Verified on a Raspberry Pi 4 running Home Assistant
-- [ ] Verified discovery and blueprint on a live Home Assistant
-- [ ] Prebuilt images: on hold, DECtalk's licence is proprietary (see Licensing)
-- [x] Pin the DECtalk source to a known-good commit (`DECTALK_REF` build arg)
-- [x] Streaming audio out (no temp files) and streaming text in (`synthesize-start` / `synthesize-chunk`)
-- [x] Bundled `kitt` (default) and `hal` impression voices
-- [ ] Tune `kitt` / `hal` by ear on real DECtalk output
-- [ ] Keep DECtalk resident (cgo/libtts) instead of one process per message
-- [x] Other DECtalk languages (UK English, German, Spanish, Latin American Spanish, French)
-- [x] Announce blueprint: mute switch, quiet hours, priority, volume with restore, no overlap
+- [ ] Better intelligibility: velar consonants, R vs L, female and child voices
+- [ ] More natural intonation (question and list contours, emphasis)
+- [ ] Other languages (letter-to-sound rules for Spanish and German are fairly regular)
+
+## History
+
+Versions up to 0.5.0 wrapped the original DECtalk engine. Its licence is proprietary, so 0.6.0
+replaced it with this engine written from published research, and the project was renamed.
+The old images containing DECtalk were withdrawn.
 
 ## Licensing
 
-The add-on code in this repo is MIT licensed (see `LICENSE`). **DECtalk itself is not part of
-this repo.** It is downloaded and compiled from [dectalk/dectalk](https://github.com/dectalk/dectalk)
-on your device when you install the add-on. Its
-[LICENCE](https://github.com/dectalk/dectalk/blob/develop/LICENCE) is proprietary (FONIX
-Corporation, all rights reserved), so this project does not publish prebuilt images containing
-DECtalk. Make sure your use is acceptable to you.
+Everything in this repository is MIT licensed (see `LICENSE`), except the embedded CMU
+Pronouncing Dictionary in `retrotalk/tts/cmudict.txt.gz`, which is © Carnegie Mellon University
+under a BSD licence (see `retrotalk/tts/CMUDICT-LICENSE`, also shipped inside the image).

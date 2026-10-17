@@ -1,6 +1,6 @@
-"""CI smoke test: drive the built image (real DECtalk) with the wyoming client Home Assistant uses.
+"""CI smoke test: drive the built image with the wyoming client Home Assistant uses.
 
-  smoke_test.py options     print add-on options (config.yaml defaults, all languages) as JSON
+  smoke_test.py options     print add-on options (config.yaml defaults) as JSON
   smoke_test.py run OUTDIR  test every voice, streaming and a >4 KB message; save WAVs to OUTDIR
 """
 import asyncio
@@ -18,14 +18,9 @@ from wyoming.info import Describe, Info
 from wyoming.tts import (Synthesize, SynthesizeChunk, SynthesizeStart, SynthesizeStop,
                          SynthesizeStopped, SynthesizeVoice)
 
-CONFIG = Path(__file__).parent.parent / "dectalk" / "config.yaml"
+CONFIG = Path(__file__).parent.parent / "retrotalk" / "config.yaml"
 HOST, PORT = "127.0.0.1", 10205
-TEXT = {
-    "en": "Hello from DECtalk. It is 72 degrees outside.",
-    "de": "Hallo von DECtalk. Draußen sind es zweiundzwanzig Grad.",
-    "es": "Hola desde DECtalk. Afuera hace veintidós grados.",
-    "fr": "Bonjour de DECtalk. Il fait vingt-deux degrés dehors.",
-}
+TEXT = "Hello from Home Assistant. It is 72°F outside and the front door is open."
 CUSTOM = {
     "kitt": "Good evening, Michael. Scanning the area now.",
     "hal": "I'm sorry, Dave. I'm afraid I can't do that.",
@@ -88,14 +83,10 @@ async def run(out):
 
     print("every voice:")
     for v in program.voices:
-        text = CUSTOM.get(v.name) or TEXT[v.languages[0].split("-")[0]]
+        text = CUSTOM.get(v.name, TEXT)
         rate, pcm, _ = await speak(text, v.name)
+        assert rate == 16000, f"{v.name}: rate {rate}"
         save(out, v.name, rate, pcm)
-
-    print("non-ASCII (informational: ° should add 'degrees'):")
-    for name, text in (("ascii", "It is 72 F."), ("degree", "It is 72°F.")):
-        rate, pcm, _ = await speak(text, "paul")
-        save(out, f"utf8_{name}", rate, pcm)
 
     print("streaming text in (Home Assistant's event order):")
     async with AsyncTcpClient(HOST, PORT) as c:
@@ -109,7 +100,7 @@ async def run(out):
         rate, pcm, _ = await collect(c, SynthesizeStopped.is_type)
         save(out, "stream_kitt", rate, pcm)
 
-    print("long message (> 4 KB, used to overflow say's buffer) and time to first audio:")
+    print("long message and time to first audio (phrase-by-phrase streaming):")
     text = "This is a long announcement used to test streaming. " * 90
     t0 = time.monotonic()
     rate, pcm, first = await speak(text, "paul")
@@ -120,8 +111,6 @@ async def run(out):
 
 if __name__ == "__main__":
     if sys.argv[1] == "options":
-        options = yaml.safe_load(CONFIG.read_text())["options"]
-        options["languages"] = ["us", "uk", "gr", "sp", "la", "fr"]
-        print(json.dumps(options))
+        print(json.dumps(yaml.safe_load(CONFIG.read_text())["options"]))
     else:
         asyncio.run(run(Path(sys.argv[2])))

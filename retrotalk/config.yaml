@@ -1,8 +1,9 @@
-name: DECtalk TTS
-version: "0.5.0"
-slug: dectalk
-description: DECtalk as a Wyoming text-to-speech server
-url: https://github.com/Tom-Neverwinter/dectalk-wyoming
+name: Retrotalk TTS
+version: "0.6.0"
+slug: retrotalk
+description: Retro formant text-to-speech (our own engine) as a Wyoming server
+url: https://github.com/Tom-Neverwinter/retrotalk-wyoming
+image: ghcr.io/tom-neverwinter/{arch}-addon-retrotalk
 stage: experimental
 arch:
   - amd64
@@ -15,8 +16,6 @@ ports:
   10205/tcp: null
 options:
   voice: kitt
-  languages:
-    - us
   custom_voices:
     - name: kitt
       base: paul
@@ -32,11 +31,8 @@ options:
 schema:
   voice: match(^[a-z0-9_-]+$)
   rate: int(75,600)?
-  languages:
-    - list(us|uk|gr|sp|la|fr)
   custom_voices:
     - name: match(^[a-z0-9_-]+$)
       base: list(paul|betty|harry|frank|dennis|kit|ursula|rita|wendy)
-      settings: match(^[a-z0-9 ]*$)?
+      settings: match(^[a-z0-9 .-]*$)?
       rate: int(75,600)?
-      language: list(us|uk|gr|sp|la|fr)?

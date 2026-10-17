@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0
+
+- **New engine, new name.** DECtalk's licence is proprietary, so it's replaced by Retrotalk,
+  a formant speech engine written from scratch from published research (Klatt), with
+  pronunciation from the CMU Pronouncing Dictionary. Everything is now redistributable.
+- Prebuilt images: installs download in seconds instead of compiling on the device
+- Audio is 16 kHz (was 11 kHz) and streams a phrase at a time
+- English only for now; the DECtalk language voices (`paul_gr`, ...) are gone
+- DECtalk inline commands (`[:...]`) in messages are ignored
+- Add-on slug is now `retrotalk`: install it fresh rather than updating the old add-on
+
 ## 0.5.0
 
 - Languages: UK English, German, Spanish (Spain and Latin America) and French built-in voices
