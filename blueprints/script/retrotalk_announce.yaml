@@ -43,6 +43,18 @@ blueprint:
       default: "00:00:00"
       selector:
         time:
+    wake_ms:
+      name: Speaker wake-up lead-in
+      description: >-
+        Silence added before each announcement. Some speakers (Sonos, many smart speakers)
+        drop the first second or so while they wake up; raise this if the start is cut off.
+      default: 1000
+      selector:
+        number:
+          min: 0
+          max: 5000
+          step: 100
+          unit_of_measurement: ms
     gap:
       name: Gap between announcements
       description: Pause after each announcement finishes before the next queued one starts.
@@ -104,6 +116,7 @@ variables:
   quiet_start: !input quiet_start
   quiet_end: !input quiet_end
   gap: !input gap
+  wake_ms: !input wake_ms
   players: >-
     {% set to_list = (speakers | default([])) %}
     {% set to_list = [to_list] if to_list is string else to_list %}
@@ -155,10 +168,18 @@ sequence:
       entity_id: "{{ tts_entity }}"
     data:
       media_player_entity_id: "{{ players }}"
-      message: "{{ message }}"
+      message: "{{ ('[:pause ' ~ wake_ms | int ~ '] ') if wake_ms | int > 0 else '' }}{{ message }}"
       options: "{{ {'voice': voice} if voice | default('') else {} }}"
   # Wait for playback to finish (bounded) so volume restore and the next announcement don't cut it off.
-  - delay: 1
+  # Some speakers (Sonos) take a few seconds to report "playing"; wait for it to start first,
+  # and if it never does, allow roughly the message's speaking time (~12 characters a second).
+  - wait_template: "{{ players | select('is_state', 'playing') | list | count > 0 }}"
+    timeout:
+      seconds: 8
+  - if: "{{ not wait.completed }}"
+    then:
+      - delay:
+          seconds: "{{ 1 + (message | length / 12) | int }}"
   - wait_template: "{{ players | select('is_state', 'playing') | list | count == 0 }}"
     timeout:
       seconds: "{{ max_seconds }}"
