@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -38,9 +40,35 @@ func TestParseWAV(t *testing.T) {
 	}
 }
 
+func TestLoadVoices(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "options.json")
+	os.WriteFile(path, []byte(`{"voice":"robot","rate":220,"custom_voices":[
+		{"name":"robot","base":"paul","settings":"pr 0"},
+		{"name":"betty","base":"betty","settings":"hs 110","rate":150}]}`), 0o644)
+	vs, def, err := loadVoices(path)
+	if err != nil || len(vs) != len(builtins)+1 {
+		t.Fatalf("got %d voices, %v", len(vs), err)
+	}
+	if got := def.prefix(); got != "[:name paul][:dv pr 0][:rate 220] " {
+		t.Fatalf("robot prefix %q", got)
+	}
+	if got := vs[1].prefix(); got != "[:name betty][:dv hs 110][:rate 150] " {
+		t.Fatalf("overridden betty prefix %q", got)
+	}
+	if _, def, _ := loadVoices(filepath.Join(t.TempDir(), "missing.json")); def.prefix() != "[:name paul] " {
+		t.Fatalf("defaults prefix %q", def.prefix())
+	}
+	os.WriteFile(path, []byte(`{"voice":"nobody"}`), 0o644)
+	if _, _, err := loadVoices(path); err == nil {
+		t.Fatal("expected error for unknown default voice")
+	}
+}
+
 func TestDescribeRoundTrip(t *testing.T) {
+	vs, def, _ := loadVoices("")
+	s := &server{voices: vs, def: def, info: info(vs)}
 	client, server := net.Pipe()
-	go handle(server)
+	go s.handle(server)
 	defer client.Close()
 
 	// Python wyoming sends data as a separate blob after the header.
@@ -55,7 +83,7 @@ func TestDescribeRoundTrip(t *testing.T) {
 			Voices []struct{ Name string } `json:"voices"`
 		} `json:"tts"`
 	}
-	if err := json.Unmarshal(data[0], &got); err != nil || got.TTS[0].Name != "dectalk" || len(got.TTS[0].Voices) != len(voices) {
+	if err := json.Unmarshal(data[0], &got); err != nil || got.TTS[0].Name != "dectalk" || len(got.TTS[0].Voices) != len(builtins) {
 		t.Fatalf("bad info: %s (%v)", data[0], err)
 	}
 }

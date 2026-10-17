@@ -1,5 +1,5 @@
 name: DECtalk TTS
-version: "0.2.0"
+version: "0.3.0"
 slug: dectalk
 description: DECtalk as a Wyoming text-to-speech server
 url: https://github.com/Tom-Neverwinter/dectalk-wyoming
@@ -9,5 +9,22 @@ arch:
 init: false
 startup: services
 boot: auto
+tmpfs: true
+discovery:
+  - wyoming
 ports:
-  10205/tcp: 10205
+  10205/tcp: null
+options:
+  voice: paul
+  custom_voices:
+    - name: robot
+      base: paul
+      settings: pr 0 ap 90
+schema:
+  voice: match(^[a-z0-9_-]+$)
+  rate: int(75,600)?
+  custom_voices:
+    - name: match(^[a-z0-9_-]+$)
+      base: list(paul|betty|harry|frank|dennis|kit|ursula|rita|wendy)
+      settings: match(^[a-z0-9 ]*$)?
+      rate: int(75,600)?

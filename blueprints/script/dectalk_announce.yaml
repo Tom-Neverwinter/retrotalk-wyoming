@@ -1,0 +1,79 @@
+blueprint:
+  name: DECtalk announce
+  description: >-
+    Speak a message on one designated speaker per room. Put the chosen label on one
+    media player in each area. Call with `areas` for specific rooms, `speakers` for
+    specific media players, or neither for everywhere.
+  domain: script
+  source_url: https://github.com/Tom-Neverwinter/dectalk-wyoming/blob/main/blueprints/script/dectalk_announce.yaml
+  homeassistant:
+    min_version: 2024.4.0
+  input:
+    tts_entity:
+      name: DECtalk TTS entity
+      selector:
+        entity:
+          filter:
+            domain: tts
+    announcer_label:
+      name: Announcer label
+      description: Label marking the one speaker per area that should talk.
+      selector:
+        label:
+
+fields:
+  message:
+    name: Message
+    required: true
+    selector:
+      text:
+        multiline: true
+  areas:
+    name: Areas
+    description: Only these rooms. Leave empty for every room.
+    selector:
+      area:
+        multiple: true
+  speakers:
+    name: Speakers
+    description: Exact media players to use. Overrides areas and the label.
+    selector:
+      entity:
+        multiple: true
+        filter:
+          domain: media_player
+  voice:
+    name: Voice
+    description: DECtalk voice name. Leave empty for the add-on's default voice.
+    selector:
+      text:
+
+mode: queued
+max: 10
+
+variables:
+  tts_entity: !input tts_entity
+  announcer_label: !input announcer_label
+  players: >-
+    {% set to_list = (speakers | default([])) %}
+    {% set to_list = [to_list] if to_list is string else to_list %}
+    {% if to_list %}
+      {{ to_list }}
+    {% else %}
+      {% set a = areas | default([]) %}
+      {% set a = [a] if a is string else a %}
+      {% set p = label_entities(announcer_label) | select('match', 'media_player\.') | list %}
+      {{ p if not a else p | select('in', a | map('area_entities') | sum(start=[])) | list }}
+    {% endif %}
+
+sequence:
+  - if: "{{ players | count == 0 }}"
+    then:
+      - stop: No announcer speakers matched. Check the label and areas.
+  - action: tts.speak
+    target:
+      entity_id: "{{ tts_entity }}"
+    data:
+      media_player_entity_id: "{{ players }}"
+      message: "{{ message }}"
+      options: "{{ {'voice': voice} if voice | default('') else {} }}"

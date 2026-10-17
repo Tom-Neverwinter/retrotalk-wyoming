@@ -3,25 +3,52 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"time"
 )
 
-const maxDataLength = 1 << 20 // client-supplied JSON is tiny; refuse anything absurd
+const (
+	maxDataLength = 1 << 20  // client-supplied JSON is tiny; refuse anything absurd
+	maxHeaderLine = 64 << 10 // bufio buffer size = longest header line accepted
+)
 
 var (
-	dist   = envOr("DECTALK_DIR", "/dectalk")
-	voices = []string{"paul", "betty", "harry", "frank", "dennis", "kit", "ursula", "rita", "wendy"}
+	dist     = envOr("DECTALK_DIR", "/dectalk")
+	builtins = []string{"paul", "betty", "harry", "frank", "dennis", "kit", "ursula", "rita", "wendy"}
 )
+
+// voice is a DECtalk speaker: a built-in base voice plus optional [:dv] tweaks and rate.
+type voice struct {
+	Name     string `json:"name"`
+	Base     string `json:"base"`
+	Settings string `json:"settings"`
+	Rate     int    `json:"rate"`
+}
+
+// prefix is the DECtalk command string that selects this voice.
+func (v voice) prefix() string {
+	p := "[:name " + v.Base + "]"
+	if v.Settings != "" {
+		p += "[:dv " + v.Settings + "]"
+	}
+	if v.Rate > 0 {
+		p += fmt.Sprintf("[:rate %d]", v.Rate)
+	}
+	return p + " "
+}
 
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
@@ -30,17 +57,60 @@ func envOr(key, def string) string {
 	return def
 }
 
-func info() map[string]any {
+// loadVoices reads the add-on options. Custom voices with a built-in's name replace it.
+// A missing file (running outside Home Assistant) means defaults.
+func loadVoices(path string) ([]voice, voice, error) {
+	o := struct {
+		Voice        string  `json:"voice"`
+		Rate         int     `json:"rate"`
+		CustomVoices []voice `json:"custom_voices"`
+	}{Voice: "paul"}
+	b, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		b, err = []byte("{}"), nil
+	}
+	if err != nil {
+		return nil, voice{}, err
+	}
+	if err := json.Unmarshal(b, &o); err != nil {
+		return nil, voice{}, fmt.Errorf("%s: %w", path, err)
+	}
+	vs := make([]voice, 0, len(builtins)+len(o.CustomVoices))
+	for _, n := range builtins {
+		vs = append(vs, voice{Name: n, Base: n, Rate: o.Rate})
+	}
+	for _, c := range o.CustomVoices {
+		if c.Rate == 0 {
+			c.Rate = o.Rate
+		}
+		if i := slices.IndexFunc(vs, func(v voice) bool { return v.Name == c.Name }); i >= 0 {
+			vs[i] = c
+		} else {
+			vs = append(vs, c)
+		}
+	}
+	i := slices.IndexFunc(vs, func(v voice) bool { return v.Name == o.Voice })
+	if i < 0 {
+		return nil, voice{}, fmt.Errorf("default voice %q is not a built-in or custom voice", o.Voice)
+	}
+	return vs, vs[i], nil
+}
+
+func info(vs []voice) map[string]any {
 	attr := map[string]string{"name": "DECtalk", "url": "https://github.com/dectalk/dectalk"}
-	vs := make([]map[string]any, len(voices))
-	for i, v := range voices {
-		vs[i] = map[string]any{"name": v, "description": v, "attribution": attr,
+	tv := make([]map[string]any, len(vs))
+	for i, v := range vs {
+		desc := v.Name
+		if v.Name != v.Base || v.Settings != "" {
+			desc = fmt.Sprintf("%s (%s %s)", v.Name, v.Base, v.Settings)
+		}
+		tv[i] = map[string]any{"name": v.Name, "description": desc, "attribution": attr,
 			"installed": true, "version": "4.61", "languages": []string{"en-US"}}
 	}
 	none := []any{}
 	return map[string]any{
 		"tts": []any{map[string]any{"name": "dectalk", "description": "DECtalk", "attribution": attr,
-			"installed": true, "version": "4.61", "voices": vs}},
+			"installed": true, "version": "4.61", "voices": tv}},
 		"asr": none, "handle": none, "intent": none, "wake": none, "mic": none, "snd": none,
 	}
 }
@@ -48,7 +118,7 @@ func info() map[string]any {
 // readEvent reads one Wyoming event: a JSON header line, optional data JSON, optional payload.
 // It returns the type and the data blobs (inline and/or trailing); payloads are discarded.
 func readEvent(r *bufio.Reader) (string, [][]byte, error) {
-	line, err := r.ReadBytes('\n')
+	line, err := r.ReadSlice('\n') // ErrBufferFull caps header size
 	if err != nil {
 		return "", nil, err
 	}
@@ -96,14 +166,15 @@ func writeEvent(w *bufio.Writer, typ string, data any, payload []byte) {
 	w.Write(payload)
 }
 
-func synth(text, voice string) (rate, width, channels int, pcm []byte, err error) {
-	dir, err := os.MkdirTemp("", "dectalk")
+// ponytail: one `say` process + temp WAV per request; link libtts via cgo if spawn cost matters.
+func synth(text string, v voice) (rate, width, channels int, pcm []byte, err error) {
+	dir, err := os.MkdirTemp("", "dectalk") // /tmp is tmpfs in the add-on, so no SD card writes
 	if err != nil {
 		return
 	}
 	defer os.RemoveAll(dir)
 	out := filepath.Join(dir, "out.wav")
-	cmd := exec.Command("./say", "-fo", out, "-a", "[:name "+voice+"] "+text)
+	cmd := exec.Command("./say", "-fo", out, "-a", v.prefix()+text)
 	cmd.Dir = dist
 	if b, e := cmd.CombinedOutput(); e != nil {
 		err = fmt.Errorf("say: %w: %s", e, b)
@@ -142,23 +213,31 @@ func parseWAV(b []byte) (rate, width, channels int, pcm []byte, err error) {
 	return
 }
 
-func speak(w *bufio.Writer, data [][]byte) error {
-	var s struct {
+type server struct {
+	voices []voice
+	def    voice
+	info   map[string]any
+}
+
+func (s *server) speak(w *bufio.Writer, data [][]byte) error {
+	var req struct {
 		Text  string `json:"text"`
 		Voice *struct {
 			Name string `json:"name"`
 		} `json:"voice"`
 	}
 	for _, d := range data {
-		if err := json.Unmarshal(d, &s); err != nil {
+		if err := json.Unmarshal(d, &req); err != nil {
 			return err
 		}
 	}
-	voice := "paul"
-	if s.Voice != nil && slices.Contains(voices, s.Voice.Name) {
-		voice = s.Voice.Name
+	v := s.def
+	if req.Voice != nil {
+		if i := slices.IndexFunc(s.voices, func(x voice) bool { return x.Name == req.Voice.Name }); i >= 0 {
+			v = s.voices[i]
+		}
 	}
-	rate, width, ch, pcm, err := synth(s.Text, voice)
+	rate, width, ch, pcm, err := synth(req.Text, v)
 	if err != nil {
 		writeEvent(w, "error", map[string]string{"text": err.Error(), "code": "synthesis-failed"}, nil)
 		w.Flush()
@@ -174,17 +253,17 @@ func speak(w *bufio.Writer, data [][]byte) error {
 	return nil
 }
 
-func handle(c net.Conn) {
+func (s *server) handle(c net.Conn) {
 	defer c.Close()
-	r, w := bufio.NewReader(c), bufio.NewWriter(c)
+	r, w := bufio.NewReaderSize(c, maxHeaderLine), bufio.NewWriter(c)
 	for {
 		typ, data, err := readEvent(r)
 		if err == nil {
 			switch typ {
 			case "describe":
-				writeEvent(w, "info", info(), nil)
+				writeEvent(w, "info", s.info, nil)
 			case "synthesize":
-				err = speak(w, data)
+				err = s.speak(w, data)
 			}
 		}
 		if err == nil {
@@ -199,18 +278,50 @@ func handle(c net.Conn) {
 	}
 }
 
+// discover tells the Supervisor where we listen so Home Assistant offers the Wyoming integration.
+func discover(port string) {
+	token := os.Getenv("SUPERVISOR_TOKEN")
+	if token == "" {
+		return // not running as an add-on
+	}
+	host, _ := os.Hostname()
+	body, _ := json.Marshal(map[string]any{"service": "wyoming",
+		"config": map[string]string{"uri": "tcp://" + host + ":" + port}})
+	req, _ := http.NewRequest(http.MethodPost, "http://supervisor/discovery", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		log.Printf("discovery: %v", err)
+		return
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("discovery: supervisor returned %s", resp.Status)
+		return
+	}
+	log.Printf("discovery: announced tcp://%s:%s", host, port)
+}
+
 func main() {
-	ln, err := net.Listen("tcp", ":"+envOr("PORT", "10205"))
+	vs, def, err := loadVoices(envOr("OPTIONS_PATH", "/data/options.json"))
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("DECtalk Wyoming server listening on %s", ln.Addr())
+	s := &server{voices: vs, def: def, info: info(vs)}
+	port := envOr("PORT", "10205")
+	ln, err := net.Listen("tcp", ":"+port)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("DECtalk Wyoming server on %s, %d voices, default %q", ln.Addr(), len(vs), def.Name)
+	go discover(port)
 	for {
 		c, err := ln.Accept()
 		if err != nil {
 			log.Print(err)
 			continue
 		}
-		go handle(c)
+		go s.handle(c)
 	}
 }
