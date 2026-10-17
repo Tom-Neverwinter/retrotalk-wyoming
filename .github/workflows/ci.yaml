@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Lint and unit tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: frenck/action-addon-linter@v2
+        with:
+          path: ./dectalk
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: dectalk/go.mod
+      - run: go vet ./... && go test ./...
+        working-directory: dectalk
+
+  build:
+    name: Build and smoke test (${{ matrix.arch }})
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: aarch64, runner: ubuntu-24.04-arm } # native arm64, no emulation
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        id: build
+        run: |
+          version=$(sed -n 's/^version: "\(.*\)"$/\1/p' dectalk/config.yaml)
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ matrix.arch }}-addon-dectalk:$version"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          docker build \
+            --label io.hass.type=addon \
+            --label io.hass.arch=${{ matrix.arch }} \
+            --label io.hass.version="$version" \
+            --label org.opencontainers.image.source="https://github.com/${{ github.repository }}" \
+            -t "$image" dectalk
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Smoke test with real DECtalk
+        run: |
+          pip install -q wyoming==1.10.2 pyyaml
+          python .github/smoke_test.py options > "$RUNNER_TEMP/options.json"
+          docker run -d --name dectalk -p 10205:10205 \
+            -v "$RUNNER_TEMP/options.json:/data/options.json:ro" "${{ steps.build.outputs.image }}"
+          python .github/smoke_test.py run smoke-out
+      - name: Container log
+        if: always()
+        run: docker logs dectalk || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: voices-${{ matrix.arch }}
+          path: smoke-out/
+      - name: Push to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker push "${{ steps.build.outputs.image }}"

@@ -32,14 +32,18 @@ var (
 	dist     = envOr("DECTALK_DIR", "/dectalk")
 	builtins = []string{"paul", "betty", "harry", "frank", "dennis", "kit", "ursula", "rita", "wendy"}
 	format   = map[string]int{"rate": sampleRate, "width": sampleWidth, "channels": sampleChannels}
+	// DECtalk language codes (say -l) and the language tags Home Assistant groups voices by.
+	languages = map[string]string{"us": "en-US", "uk": "en-GB", "gr": "de-DE", "sp": "es-ES", "la": "es-419", "fr": "fr-FR"}
 )
 
-// voice is a DECtalk speaker: a built-in base voice plus optional [:dv] tweaks and rate.
+// voice is a DECtalk speaker: a built-in base voice plus optional [:dv] tweaks, rate and language.
 type voice struct {
 	Name     string `json:"name"`
 	Base     string `json:"base"`
 	Settings string `json:"settings"`
 	Rate     int    `json:"rate"`
+	Language string `json:"language"`
+	desc     string
 }
 
 // prefix is the DECtalk command string that selects this voice.
@@ -61,14 +65,16 @@ func envOr(key, def string) string {
 	return def
 }
 
-// loadVoices reads the add-on options. Custom voices with a built-in's name replace it.
+// loadVoices reads the add-on options. Built-ins are listed for each enabled language
+// ("paul", "paul_gr", ...); custom voices with an existing name replace it.
 // A missing file (running outside Home Assistant) means defaults.
 func loadVoices(path string) ([]voice, voice, error) {
 	o := struct {
-		Voice        string  `json:"voice"`
-		Rate         int     `json:"rate"`
-		CustomVoices []voice `json:"custom_voices"`
-	}{Voice: "paul"}
+		Voice        string   `json:"voice"`
+		Rate         int      `json:"rate"`
+		Languages    []string `json:"languages"`
+		CustomVoices []voice  `json:"custom_voices"`
+	}{Voice: "paul", Languages: []string{"us"}}
 	b, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		b, err = []byte("{}"), nil
@@ -79,14 +85,30 @@ func loadVoices(path string) ([]voice, voice, error) {
 	if err := json.Unmarshal(b, &o); err != nil {
 		return nil, voice{}, fmt.Errorf("%s: %w", path, err)
 	}
-	vs := make([]voice, 0, len(builtins)+len(o.CustomVoices))
-	for _, n := range builtins {
-		vs = append(vs, voice{Name: n, Base: n, Rate: o.Rate})
+	vs := make([]voice, 0, len(o.Languages)*len(builtins)+len(o.CustomVoices))
+	for _, l := range o.Languages {
+		if _, ok := languages[l]; !ok {
+			return nil, voice{}, fmt.Errorf("unknown language %q", l)
+		}
+		for _, n := range builtins {
+			name := n
+			if l != "us" {
+				name += "_" + l
+			}
+			vs = append(vs, voice{Name: name, Base: n, Rate: o.Rate, Language: l, desc: n})
+		}
 	}
 	for _, c := range o.CustomVoices {
 		if c.Rate == 0 {
 			c.Rate = o.Rate
 		}
+		if c.Language == "" {
+			c.Language = "us"
+		}
+		if _, ok := languages[c.Language]; !ok {
+			return nil, voice{}, fmt.Errorf("custom voice %q: unknown language %q", c.Name, c.Language)
+		}
+		c.desc = fmt.Sprintf("%s (%s %s)", c.Name, c.Base, c.Settings)
 		if i := slices.IndexFunc(vs, func(v voice) bool { return v.Name == c.Name }); i >= 0 {
 			vs[i] = c
 		} else {
@@ -104,12 +126,8 @@ func info(vs []voice) map[string]any {
 	attr := map[string]string{"name": "DECtalk", "url": "https://github.com/dectalk/dectalk"}
 	tv := make([]map[string]any, len(vs))
 	for i, v := range vs {
-		desc := v.Name
-		if v.Name != v.Base || v.Settings != "" {
-			desc = fmt.Sprintf("%s (%s %s)", v.Name, v.Base, v.Settings)
-		}
-		tv[i] = map[string]any{"name": v.Name, "description": desc, "attribution": attr,
-			"installed": true, "version": "4.61", "languages": []string{"en-US"}}
+		tv[i] = map[string]any{"name": v.Name, "description": v.desc, "attribution": attr,
+			"installed": true, "version": "4.61", "languages": []string{languages[v.Language]}}
 	}
 	none := []any{}
 	return map[string]any{
@@ -198,7 +216,11 @@ type session struct {
 
 func (c *conn) start(v voice) (*session, error) {
 	// -c: clause mode, DECtalk speaks each clause as soon as it's complete. "-" must be last.
-	cmd := exec.Command("./say", "-c", "-fo", "stdout:raw", "-")
+	args := []string{"-c", "-fo", "stdout:raw"}
+	if v.Language != "" && v.Language != "us" {
+		args = append(args, "-l", v.Language)
+	}
+	cmd := exec.Command("./say", append(args, "-")...)
 	cmd.Dir = dist
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

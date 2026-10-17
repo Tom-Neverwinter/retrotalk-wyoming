@@ -5,6 +5,7 @@
 [![Add repository to Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FTom-Neverwinter%2Fdectalk-wyoming)
 [![Import announce blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FTom-Neverwinter%2Fdectalk-wyoming%2Fblob%2Fmain%2Fblueprints%2Fscript%2Fdectalk_announce.yaml)
 
+[![CI](https://github.com/Tom-Neverwinter/dectalk-wyoming/actions/workflows/ci.yaml/badge.svg)](https://github.com/Tom-Neverwinter/dectalk-wyoming/actions/workflows/ci.yaml)
 ![Version](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fraw.githubusercontent.com%2FTom-Neverwinter%2Fdectalk-wyoming%2Fmain%2Fdectalk%2Fconfig.yaml&query=%24.version&label=version)
 ![Project stage: experimental](https://img.shields.io/badge/project%20stage-experimental-orange)
 ![Supports aarch64](https://img.shields.io/badge/aarch64-yes-green)
@@ -23,10 +24,11 @@ server. No cloud, no internet needed once installed.
 - 9 built-in DECtalk voices, plus **your own custom voices** set in the add-on's Configuration tab
 - Bundled impression voices: `kitt` (default) and `hal`
 - Streaming: audio starts playing before the whole message is synthesized
-- Default voice and speaking rate configurable in the UI
+- Default voice, speaking rate and languages configurable in the UI
+- 6 languages: US and UK English, German, Spanish (Spain and Latin America), French
 - Auto-discovered by Home Assistant's Wyoming integration
 - **Announce blueprint:** speak everywhere, in chosen rooms, or on chosen speakers, with one
-  designated speaker per room
+  designated speaker per room, plus mute switch, quiet hours, priority alerts and volume
 
 ## Install
 
@@ -49,6 +51,7 @@ Full docs (options, making custom voices, announcements) are in
 | `dectalk/translations/en.yaml` | UI labels for the options |
 | `dectalk/Dockerfile` | Builds DECtalk from upstream and checks it can produce a WAV |
 | `blueprints/script/dectalk_announce.yaml` | Room/speaker announcement script blueprint |
+| `.github/workflows/ci.yaml` | Lint, unit tests, then build both architectures and smoke-test real DECtalk (WAVs uploaded as artifacts) |
 
 Run the tests with `cd dectalk && go test ./...`.
 
@@ -59,7 +62,8 @@ Run the tests with `cd dectalk && go test ./...`.
 - [x] UI options: default voice, rate, custom voices
 - [x] Wyoming auto-discovery via the Supervisor
 - [x] Announcement blueprint (all / areas / speakers)
-- [ ] Verified full add-on build on a Raspberry Pi 4
+- [x] DECtalk builds and speaks on amd64 and aarch64 (CI smoke test with real DECtalk)
+- [ ] Verified on a Raspberry Pi 4 running Home Assistant
 - [ ] Verified discovery and blueprint on a live Home Assistant
 - [ ] Prebuilt images (currently builds on your device)
 - [x] Pin the DECtalk source to a known-good commit (`DECTALK_REF` build arg)
@@ -67,7 +71,8 @@ Run the tests with `cd dectalk && go test ./...`.
 - [x] Bundled `kitt` (default) and `hal` impression voices
 - [ ] Tune `kitt` / `hal` by ear on real DECtalk output
 - [ ] Keep DECtalk resident (cgo/libtts) instead of one process per message
-- [ ] Other DECtalk languages (Spanish, German, …)
+- [x] Other DECtalk languages (UK English, German, Spanish, Latin American Spanish, French)
+- [x] Announce blueprint: mute switch, quiet hours, priority, volume with restore, no overlap
 
 ## Licensing
 

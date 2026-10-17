@@ -18,10 +18,30 @@
 |---|---|
 | **Default voice** | Voice used when a request doesn't name one. Any built-in or custom voice name. |
 | **Speaking rate** | Words per minute for all voices (75-600). Unset = DECtalk default. |
+| **Languages** | Which languages get the 9 built-in voices (see [Languages](#languages)). Default: US English. |
 | **Custom voices** | Your own voices (below). They show up in Home Assistant's voice pickers. |
 
 Restart the add-on after changing options, then **reload** the Wyoming integration so
 Home Assistant sees new voices.
+
+## Languages
+
+DECtalk speaks six languages. Enable the ones you want under **Languages**; each adds the
+9 built-in voices for that language.
+
+| Code | Language | Voice names | Home Assistant language |
+|---|---|---|---|
+| `us` | English (US) | `paul`, `betty`, ... | en-US |
+| `uk` | English (UK) | `paul_uk`, `betty_uk`, ... | en-GB |
+| `gr` | German | `paul_gr`, ... | de-DE |
+| `sp` | Spanish (Spain) | `paul_sp`, ... | es-ES |
+| `la` | Spanish (Latin America) | `paul_la`, ... | es-419 |
+| `fr` | French | `paul_fr`, ... | fr-FR |
+
+Home Assistant lists each voice under its language. Pick a voice in your voice assistant
+or `tts.speak`, because Home Assistant does not tell the add-on which language you want;
+without a voice it uses the **Default voice**. Custom voices take an optional `language`
+(default `us`).
 
 ## Built-in voices
 
@@ -129,6 +149,11 @@ Use the **DECtalk announce** script blueprint from the repository:
 2. Put that label on **one** media player (or its device) per room: the one that should speak there.
    Other speakers in the room stay quiet.
 3. Create a script from the blueprint, choosing your DECtalk TTS entity and the label.
+   Optional settings:
+   - **Mute switch:** an `input_boolean` or `switch`; while it's on, announcements are skipped.
+   - **Quiet hours:** start and end time (e.g. 22:00 to 07:00) when announcements are skipped.
+     Same start and end = off.
+   - **Gap between announcements:** pause after one finishes before the next queued one plays.
 4. Call the script:
 
 ```yaml
@@ -137,11 +162,12 @@ action: script.announce
 data:
   message: Dinner is ready.
 
-# Specific rooms (their labelled speaker only)
+# Specific rooms (their labelled speaker only), at 40% volume
 action: script.announce
 data:
   message: Laundry is done.
   areas: [kitchen, living_room]
+  volume: 40
 
 # Specific speakers (ignores labels and rooms)
 action: script.announce
@@ -149,7 +175,32 @@ data:
   message: Testing.
   speakers: [media_player.office_speaker]
   voice: robot
+
+# Safety alert: plays even when muted or in quiet hours
+action: script.announce
+data:
+  message: Water leak detected under the kitchen sink.
+  priority: true
+  volume: 80
 ```
+
+| Field | What it does |
+|---|---|
+| `message` | Text to speak (required) |
+| `areas` | Only these rooms' labelled speakers |
+| `speakers` | Exact media players; overrides `areas` and the label |
+| `voice` | DECtalk voice; empty = add-on default |
+| `volume` | 0-100 for this announcement; the previous volume is restored afterwards |
+| `priority` | Ignore the mute switch and quiet hours |
+
+How it behaves:
+- Announcements **queue** (up to 10) and never talk over each other: the script waits for
+  the speakers to stop playing (up to about 5 s + 1 s per 10 characters), then the gap.
+- Volume is restored only on players that report a volume. Players that don't report
+  `playing` are restored once the time estimate runs out.
+- Skipped announcements (muted or quiet hours) are logged in the script's trace with the reason.
+- To ignore repeats from a chatty trigger (e.g. a doorbell), make the **calling automation**
+  `mode: single` with a short `delay` at the end.
 
 Home Assistant caches generated speech, so repeating the same message is instant.
 
