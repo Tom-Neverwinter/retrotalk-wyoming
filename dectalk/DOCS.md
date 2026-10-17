@@ -126,7 +126,7 @@ Use the **DECtalk announce** script blueprint from the repository:
 [![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FTom-Neverwinter%2Fdectalk-wyoming%2Fblob%2Fmain%2Fblueprints%2Fscript%2Fdectalk_announce.yaml)
 
 1. Create a label, e.g. **Announcer** (**Settings → Areas, labels & zones → Labels**).
-2. Put that label on **one** media player per room: the one that should speak there.
+2. Put that label on **one** media player (or its device) per room: the one that should speak there.
    Other speakers in the room stay quiet.
 3. Create a script from the blueprint, choosing your DECtalk TTS entity and the label.
 4. Call the script:

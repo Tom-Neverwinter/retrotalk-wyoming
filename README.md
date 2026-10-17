@@ -49,7 +49,7 @@ Run the tests with `cd dectalk && go test ./...`.
 - [ ] Verified full add-on build on a Raspberry Pi 4
 - [ ] Verified discovery and blueprint on a live Home Assistant
 - [ ] Prebuilt images (currently builds on your device)
-- [ ] Pin the DECtalk source to a known-good commit
+- [x] Pin the DECtalk source to a known-good commit (`DECTALK_REF` build arg)
 - [x] Streaming audio out (no temp files) and streaming text in (`synthesize-start` / `synthesize-chunk`)
 - [x] Bundled `kitt` (default) and `hal` impression voices
 - [ ] Tune `kitt` / `hal` by ear on real DECtalk output

@@ -22,6 +22,7 @@ import (
 const (
 	maxDataLength = 1 << 20  // client-supplied JSON is tiny; refuse anything absurd
 	maxHeaderLine = 64 << 10 // bufio buffer size = longest header line accepted
+	maxSession    = 5 * time.Minute
 
 	// say's default encoding (-e 1): 16-bit mono 11025 Hz, host byte order (little-endian on amd64/aarch64).
 	sampleRate, sampleWidth, sampleChannels = 11025, 2, 1
@@ -213,12 +214,15 @@ func (c *conn) start(v voice) (*session, error) {
 		return nil, fmt.Errorf("say: %w", err)
 	}
 	s := &session{cmd: cmd, stdin: stdin, done: make(chan error, 1)}
+	watchdog := time.AfterFunc(maxSession, func() { cmd.Process.Kill() }) // a hung say must not pin the connection
 	go func() {
 		err := c.pump(stdout)
 		if err != nil {
 			cmd.Process.Kill() // client is gone; don't let say block on a full pipe
 		}
-		if werr := cmd.Wait(); werr != nil && err == nil {
+		werr := cmd.Wait()
+		watchdog.Stop()
+		if werr != nil && err == nil {
 			err = fmt.Errorf("say: %w: %s", werr, bytes.TrimSpace(stderr.Bytes()))
 		}
 		s.done <- err

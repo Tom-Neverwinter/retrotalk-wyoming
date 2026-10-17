@@ -62,7 +62,9 @@ variables:
     {% else %}
       {% set a = areas | default([]) %}
       {% set a = [a] if a is string else a %}
-      {% set p = label_entities(announcer_label) | select('match', 'media_player\.') | list %}
+      {% set labelled = label_entities(announcer_label)
+           + (label_devices(announcer_label) | map('device_entities') | sum(start=[])) %}
+      {% set p = labelled | select('match', 'media_player\.') | unique | list %}
       {{ p if not a else p | select('in', a | map('area_entities') | sum(start=[])) | list }}
     {% endif %}
 
