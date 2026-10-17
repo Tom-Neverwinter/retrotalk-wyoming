@@ -1,7 +1,7 @@
 name: Retrotalk TTS
-version: "0.6.0"
+version: "0.7.0"
 slug: retrotalk
-description: Retro formant text-to-speech (our own engine) as a Wyoming server
+description: Retro formant text-to-speech in six languages (our own engine) as a Wyoming server
 url: https://github.com/Tom-Neverwinter/retrotalk-wyoming
 image: ghcr.io/tom-neverwinter/{arch}-addon-retrotalk
 stage: experimental
@@ -16,23 +16,48 @@ ports:
   10205/tcp: null
 options:
   voice: kitt
+  languages:
+    - us
   custom_voices:
     - name: kitt
       base: paul
-      settings: ap 125 pr 120 ri 70 hs 95 as 70
-      rate: 185
+      settings: ap 114 pr 111 hs 95 sm 15 ri 80 na 10 as 75 qu 70
+      rate: 269
     - name: hal
       base: paul
-      settings: ap 95 pr 35 sm 70 hs 105 as 30
-      rate: 150
+      settings: ap 84 pr 101 hs 96 sm 35 ri 55 br 8 as 35 qu 35
+      rate: 235
+    - name: glados
+      base: betty
+      settings: ap 153 pr 101 hs 82 sm 20 ri 70 br 0 as 60 qu 60 pq 95
+      rate: 247
+    - name: turret
+      base: betty
+      settings: ap 214 pr 133 hs 102 sm 55 ri 45 br 0 as 40 qu 50 pq 100
+      rate: 141
+    - name: jarvis
+      base: paul
+      settings: ap 109 pr 98 hs 97 sm 30 ri 65 as 65 qu 55
+      rate: 252
+    - name: narrator
+      base: harry
+      settings: ap 80 pr 86 hs 107 sm 40 ri 70 br 5 as 70 qu 35
+      rate: 190
     - name: robot
       base: paul
       settings: pr 0 ap 90
+  pronunciations: []
 schema:
   voice: match(^[a-z0-9_-]+$)
   rate: int(75,600)?
+  languages:
+    - list(us|uk|gr|sp|la|fr)
   custom_voices:
     - name: match(^[a-z0-9_-]+$)
       base: list(paul|betty|harry|frank|dennis|kit|ursula|rita|wendy)
       settings: match(^[a-z0-9 .-]*$)?
       rate: int(75,600)?
+      language: list(us|uk|gr|sp|la|fr)?
+  pronunciations:
+    - word: str
+      say: str

@@ -18,7 +18,26 @@ type Voice struct {
 	Assert     float64 // as: %, how far statements fall at the end
 	Quick      float64 // qu: %, how fast pitch moves
 	Loud       float64 // lo: dB relative to normal
-	Rate       float64 // words per minute
+	Nasal      float64 // na: %, nasal resonance in vowels (twang)
+	Steps      float64 // pq: %, snap pitch to whole tones (autotune: flat notes, sudden jumps)
+
+	// Intonation shape in Hz; 0 = automatic (scaled from pitch and pitch range).
+	Fall       float64 // bf: baseline fall over a phrase
+	Hat        float64 // hr: extra rise on a phrase's first accent
+	StressRise float64 // sr: rise on an accented syllable
+
+	// Source levels in dB relative to normal.
+	GainVoice float64 // gv: voicing
+	GainAsp   float64 // gh: aspiration (h, breathy release)
+	GainFric  float64 // gf: frication (s, f, sh...)
+	GainNasal float64 // gn: nasal murmur (m, n, ng)
+
+	// Upper formants and source shape; 0 = automatic.
+	F4, B4, F5, B5 float64 // f4 b4 f5 b5: Hz
+	Lax            float64 // lx: %, breath noise even while the glottis is closed
+	OpenQuotient   float64 // nf: %, share of each glottal cycle spent open
+	Rate           float64 // words per minute
+	Lang           string  // language tag ("es-ES"); "" = US English
 }
 
 // Presets are the built-in voices.
@@ -31,7 +50,7 @@ var Presets = map[string]Voice{
 	"ursula": {Pitch: 190, PitchRange: 120, HeadSize: 88, Breath: 5, Smooth: 30, Rich: 80, Assert: 90, Quick: 60, Rate: 185},
 	"rita":   {Pitch: 175, PitchRange: 80, HeadSize: 88, Breath: 10, Smooth: 30, Rich: 50, Creak: 45, Assert: 70, Quick: 40, Rate: 175},
 	"wendy":  {Pitch: 210, PitchRange: 90, HeadSize: 85, Breath: 70, Smooth: 70, Rich: 30, Assert: 50, Quick: 40, Rate: 170},
-	"kit":    {Pitch: 270, PitchRange: 120, HeadSize: 78, Breath: 10, Smooth: 40, Rich: 50, Assert: 60, Quick: 60, Rate: 180},
+	"kit":    {Pitch: 255, PitchRange: 120, HeadSize: 80, Breath: 20, Smooth: 65, Rich: 30, Assert: 60, Quick: 60, Rate: 175},
 }
 
 // With applies "code value" pairs such as "ap 90 pr 0 hs 110" on top of v.
@@ -66,6 +85,36 @@ func (v Voice) With(settings string) (Voice, error) {
 			v.Quick = clamp(n, 0, 100)
 		case "lo":
 			v.Loud = clamp(n, -30, 12)
+		case "na":
+			v.Nasal = clamp(n, 0, 100)
+		case "pq":
+			v.Steps = clamp(n, 0, 100)
+		case "bf":
+			v.Fall = clamp(n, 0, 200)
+		case "hr":
+			v.Hat = clamp(n, 0, 200)
+		case "sr":
+			v.StressRise = clamp(n, 0, 300)
+		case "gv":
+			v.GainVoice = clamp(n, -30, 20)
+		case "gh":
+			v.GainAsp = clamp(n, -30, 20)
+		case "gf":
+			v.GainFric = clamp(n, -30, 20)
+		case "gn":
+			v.GainNasal = clamp(n, -30, 20)
+		case "f4":
+			v.F4 = clamp(n, 2500, 5000)
+		case "b4":
+			v.B4 = clamp(n, 50, 1000)
+		case "f5":
+			v.F5 = clamp(n, 3000, 6500)
+		case "b5":
+			v.B5 = clamp(n, 50, 1500)
+		case "lx":
+			v.Lax = clamp(n, 0, 100)
+		case "nf":
+			v.OpenQuotient = clamp(n, 0, 95)
 		case "sx":
 			if n == 0 {
 				v.HeadSize = 85

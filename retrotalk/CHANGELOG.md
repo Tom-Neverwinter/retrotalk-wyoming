@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.7.0
+
+- **Much clearer speech.** Engine constants tuned automatically against speech recognizers,
+  plus fixes for "-ing" endings and z/v/th sounds: word errors on unseen sentences fell from
+  32% to 17%, and every language benefits
+- **Intonation:** yes/no questions rise, wh-questions fall, lists rise between items, later
+  clauses step down, exclamations are livelier
+- **Languages:** UK English, Spanish (Spain and Latin America), German and French (experimental),
+  enabled under the new Languages option; custom voices take a `language`
+- **Character voices** fitted to measurements of reference recordings: `kitt`, `hal`, `glados`,
+  `turret`, `jarvis`, `narrator`, plus `robot`; `kit` is softer
+- **Inline commands:** `[:rate]`, `[:volume]`, `[:name]` voice switching, `[:dv]`, `[:lang]`,
+  pauses, spell mode, reading punctuation, tones and telephone dialing
+- **Phonemic input and singing:** `[hh ah1 l ow]`, `[d ey<600,32>]`
+- **Pronunciations** option to fix names and words
+- **Emphasis** with `*asterisks*`
+- New voice settings: `na` nasality, `pq` pitch steps (autotune), and DECtalk's `bf` `hr` `sr`
+  `gv` `gh` `gf` `gn` `f4` `b4` `f5` `b5` `lx` `nf`
+- Fixed: high voices were louder than low ones; "-5°F" now reads "minus five degrees"
+
 ## 0.6.0
 
 - **New engine, new name.** DECtalk's licence is proprietary, so it's replaced by Retrotalk,

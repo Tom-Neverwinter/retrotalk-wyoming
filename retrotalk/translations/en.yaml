@@ -7,11 +7,22 @@ configuration:
   rate:
     name: Speaking rate
     description: Words per minute for every voice (75-600). Leave unset for each voice's own rate.
+  languages:
+    name: Languages
+    description: >-
+      Built-in voices to offer per language: us (US English), uk (UK English), gr (German),
+      sp (Spanish, Spain), la (Spanish, Latin America), fr (French). Non-US voices are named
+      like paul_gr.
   custom_voices:
     name: Custom voices
     description: >-
-      Extra voices built from a base voice plus voice settings, e.g. "ap 90 pr 0".
-      See the Documentation tab for the settings list.
+      Extra voices built from a base voice plus voice settings, e.g. "ap 90 pr 0", with an
+      optional language (default us). See the Documentation tab for the settings list.
+  pronunciations:
+    name: Pronunciations
+    description: >-
+      Fix how words are said, e.g. word "Nguyen", say "new win". "say" is a respelling in
+      ordinary words, or phonemes in brackets like "[n w ih1 n]".
 network:
   10205/tcp: >-
     Wyoming port on the host. Not needed for Home Assistant itself; only enable it for

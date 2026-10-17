@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -70,7 +71,7 @@ func readReply(t *testing.T, r *bufio.Reader) event {
 func exchange(t *testing.T, send []string, stop string) (types []string, audio int) {
 	t.Helper()
 	vs, def, _ := loadVoices("")
-	s := &server{voices: vs, def: def, info: info(vs)}
+	s := newServer(vs, def, nil)
 	client, server := net.Pipe()
 	go s.handle(server)
 	defer client.Close()
@@ -124,7 +125,7 @@ func TestStreaming(t *testing.T) {
 // A completed phrase is spoken before the stream ends.
 func TestStreamingSpeaksEarly(t *testing.T) {
 	vs, def, _ := loadVoices("")
-	s := &server{voices: vs, def: def, info: info(vs)}
+	s := newServer(vs, def, nil)
 	client, server := net.Pipe()
 	go s.handle(server)
 	defer client.Close()
@@ -136,5 +137,52 @@ func TestStreamingSpeaksEarly(t *testing.T) {
 	}
 	if ev := readReply(t, r); ev.Type != "audio-chunk" {
 		t.Fatalf("second reply %q", ev.Type)
+	}
+}
+
+func TestLanguages(t *testing.T) {
+	vs, _, err := loadVoices(writeOptions(t, `{"languages":["us","gr"],
+		"custom_voices":[{"name":"heidi","base":"betty","language":"gr"}]}`))
+	if err != nil || len(vs) != 19 {
+		t.Fatalf("got %d voices, %v", len(vs), err)
+	}
+	tags := map[string]string{}
+	for _, v := range info(vs)["tts"].([]any)[0].(map[string]any)["voices"].([]map[string]any) {
+		tags[v["name"].(string)] = v["languages"].([]string)[0]
+	}
+	if tags["paul"] != "en-US" || tags["paul_gr"] != "de-DE" || tags["heidi"] != "de-DE" {
+		t.Fatal(tags)
+	}
+	for _, bad := range []string{`{"languages":["xx"]}`, `{"custom_voices":[{"name":"x","base":"paul","language":"xx"}]}`} {
+		if _, _, err := loadVoices(writeOptions(t, bad)); err == nil {
+			t.Fatalf("expected error for %s", bad)
+		}
+	}
+}
+
+func TestLoadLexicon(t *testing.T) {
+	lex, err := loadLexicon(writeOptions(t, `{"pronunciations":[
+		{"word":"Nguyen","say":"new win"},{"word":"Hisense","say":"[hh ay1 s eh2 n s]"}]}`))
+	if err != nil || strings.Join(lex["nguyen"], " ") != "N UW1 W IH1 N" || len(lex["hisense"]) != 6 {
+		t.Fatalf("%v %v", lex, err)
+	}
+	if _, err := loadLexicon(writeOptions(t, `{"pronunciations":[{"word":"x","say":""}]}`)); err == nil {
+		t.Fatal("expected error for an empty pronunciation")
+	}
+}
+
+// A [:rate] command in one streamed chunk still applies to the next chunk.
+func TestStreamingKeepsCommandState(t *testing.T) {
+	stream := func(first string) int {
+		_, audio := exchange(t, []string{
+			`{"type":"synthesize-start","data":{"voice":{"name":"paul"}}}`,
+			`{"type":"synthesize-chunk","data":{"text":"` + first + `Hello there. "}}`,
+			`{"type":"synthesize-chunk","data":{"text":"This sentence comes in a later chunk."}}`,
+			`{"type":"synthesize-stop"}`,
+		}, "synthesize-stopped")
+		return audio
+	}
+	if normal, fast := stream(""), stream("[:rate 400] "); float64(fast) > 0.7*float64(normal) {
+		t.Fatalf("rate did not carry over: %d vs %d bytes", fast, normal)
 	}
 }

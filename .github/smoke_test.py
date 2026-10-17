@@ -1,6 +1,6 @@
 """CI smoke test: drive the built image with the wyoming client Home Assistant uses.
 
-  smoke_test.py options     print add-on options (config.yaml defaults) as JSON
+  smoke_test.py options     print add-on options (config.yaml defaults, every language) as JSON
   smoke_test.py run OUTDIR  test every voice, streaming and a >4 KB message; save WAVs to OUTDIR
 """
 import asyncio
@@ -20,7 +20,12 @@ from wyoming.tts import (Synthesize, SynthesizeChunk, SynthesizeStart, Synthesiz
 
 CONFIG = Path(__file__).parent.parent / "retrotalk" / "config.yaml"
 HOST, PORT = "127.0.0.1", 10205
-TEXT = "Hello from Home Assistant. It is 72°F outside and the front door is open."
+TEXT = {
+    "en": "Hello from Home Assistant. It is 72°F outside and the front door is open.",
+    "es": "Hola. Hace 21 grados y la puerta principal está abierta.",
+    "de": "Hallo. Es sind 21 Grad und die Haustür ist offen.",
+    "fr": "Bonjour. Il fait 21 degrés et la porte d'entrée est ouverte.",
+}
 CUSTOM = {
     "kitt": "Good evening, Michael. Scanning the area now.",
     "hal": "I'm sorry, Dave. I'm afraid I can't do that.",
@@ -83,10 +88,17 @@ async def run(out):
 
     print("every voice:")
     for v in program.voices:
-        text = CUSTOM.get(v.name, TEXT)
+        text = CUSTOM.get(v.name) or TEXT[v.languages[0][:2]]
         rate, pcm, _ = await speak(text, v.name)
         assert rate == 16000, f"{v.name}: rate {rate}"
         save(out, v.name, rate, pcm)
+
+    print("inline commands, singing, spelling:")
+    for name, text in (("tone_switch", "[:tone 880,150] Ding. [:name hal] Good afternoon."),
+                       ("singing", "[d ey<600,32> z iy<600,29> d ey<600,25> z iy<600,20>]"),
+                       ("spell", "[:mode spell on]ABC 123")):
+        rate, pcm, _ = await speak(text, "paul")
+        save(out, f"cmd_{name}", rate, pcm)
 
     print("streaming text in (Home Assistant's event order):")
     async with AsyncTcpClient(HOST, PORT) as c:
@@ -111,6 +123,8 @@ async def run(out):
 
 if __name__ == "__main__":
     if sys.argv[1] == "options":
-        print(json.dumps(yaml.safe_load(CONFIG.read_text())["options"]))
+        options = yaml.safe_load(CONFIG.read_text())["options"]
+        options["languages"] = ["us", "uk", "sp", "la", "gr", "fr"]
+        print(json.dumps(options))
     else:
         asyncio.run(run(Path(sys.argv[2])))

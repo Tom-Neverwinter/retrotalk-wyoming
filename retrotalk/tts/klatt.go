@@ -85,7 +85,9 @@ func (g *glottis) next(f0, openQuotient, jitter float64, rnd *rng) float64 {
 		} else {
 			g.period = SampleRate / f0 * (1 + jitter*rnd.signed())
 			g.open = openQuotient * g.period
-			g.gain = 1 + 0.5*jitter*rnd.signed() // shimmer goes with jitter
+			// Each pulse's closure excites the tract equally, so power grows with pitch;
+			// scaling by sqrt(120/f0) keeps high voices from sounding louder than low ones.
+			g.gain = math.Sqrt(120/f0) * (1 + 0.5*jitter*rnd.signed()) // shimmer goes with jitter
 		}
 	}
 	x := g.pos / g.open
@@ -122,15 +124,25 @@ type synth struct {
 	fricRes                bandpass
 	openQuotient, tiltCoef float64
 	breath, jitter, gain   float64
+	aspiration             float64
+	gv, gf, lax            float64
 }
 
 func newSynth(v Voice) *synth {
 	s := &synth{v: v, rnd: rng{s: 0x2545F491}}
 	s.openQuotient = 0.65 - 0.25*v.Rich/100 + 0.15*v.Smooth/100
+	if v.OpenQuotient > 0 {
+		s.openQuotient = v.OpenQuotient / 100
+	}
 	s.tiltCoef = 0.15 + 0.6*v.Smooth/100
 	s.breath = v.Breath / 72
 	s.jitter = 0.005 + 0.06*v.Creak/100
-	s.gain = 0.27 * math.Pow(10, v.Loud/20)
+	// Nasality's antiformant costs about 3 dB once it leaves the nasal pole; give it back.
+	nasalComp := 3 * min(1, v.Nasal/20)
+	s.gain = 0.27 * math.Pow(10, (v.Loud+nasalComp)/20)
+	s.aspiration = tune["asp_gain"] * math.Pow(10, v.GainAsp/20)
+	s.gv, s.gf = math.Pow(10, v.GainVoice/20), math.Pow(10, v.GainFric/20)
+	s.lax = v.Lax / 100
 	s.nasalPole.set(270, 100)
 	return s
 }
@@ -145,12 +157,27 @@ func (s *synth) render(frames []frame) []byte {
 			next = frames[i+1]
 		}
 		for k := range s.cascade {
-			s.cascade[k].set(fr.f[k]*scale, fr.bw[k]*math.Sqrt(scale))
+			f, bw := fr.f[k]*scale, fr.bw[k]*math.Sqrt(scale)
+			if k == 3 && s.v.F4 > 0 {
+				f = s.v.F4
+			}
+			if k == 3 && s.v.B4 > 0 {
+				bw = s.v.B4
+			}
+			if k == 4 && s.v.F5 > 0 {
+				f = s.v.F5
+			}
+			if k == 4 && s.v.B5 > 0 {
+				bw = s.v.B5
+			}
+			s.cascade[k].set(f, bw)
 		}
 		if fr.nasalZero > 0 {
 			s.nasalZero.set(fr.nasalZero*scale, 100)
 		} else {
-			s.nasalZero.set(270, 100) // cancels the nasal pole
+			// Without nasality the zero cancels the nasal pole. Nasality moves it away, coupling
+			// in the nasal resonance (Klatt's vowel nasalization).
+			s.nasalZero.set(270+2.5*s.v.Nasal, 100)
 		}
 		if fr.noise.f > 0 {
 			s.fricRes.set(fr.noise.f, fr.noise.bw)
@@ -158,9 +185,9 @@ func (s *synth) render(frames []frame) []byte {
 		for n := 0; n < frameLen; n++ {
 			t := float64(n) / frameLen
 			f0 := fr.f0 + (next.f0-fr.f0)*t
-			av := fr.av + (next.av-fr.av)*t
+			av := (fr.av + (next.av-fr.av)*t) * s.gv
 			ah := fr.ah + (next.ah-fr.ah)*t
-			af := fr.af + (next.af-fr.af)*t
+			af := (fr.af + (next.af-fr.af)*t) * s.gf
 			if fr.f0 <= 0 || next.f0 <= 0 {
 				f0 = math.Max(fr.f0, next.f0)
 			}
@@ -169,9 +196,11 @@ func (s *synth) render(frames []frame) []byte {
 			src := s.glot.next(f0, s.openQuotient, s.jitter, &s.rnd) * av
 			if s.glot.isOpen() {
 				src += noise * av * s.breath * 0.6 // breathy voice: turbulence while the glottis is open
+			} else {
+				src += noise * av * s.lax * 0.3 // lax voice: the glottis never quite closes
 			}
 			s.tilt = src*(1-s.tiltCoef) + s.tilt*s.tiltCoef
-			x := s.tilt + noise*ah*0.22
+			x := s.tilt + noise*ah*s.aspiration
 
 			x = s.nasalZero.step(s.nasalPole.step(x))
 			for k := len(s.cascade) - 1; k >= 0; k-- {

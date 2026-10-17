@@ -9,8 +9,17 @@ import (
 
 // phrase is a run of words spoken under one intonation contour, ended by punctuation.
 type phrase struct {
-	words []string // original spelling (case kept for acronym detection)
-	end   byte     // '.', '?', '!', ',' or 0
+	words []word
+	end   byte // '.', '?', '!', ',' or 0
+}
+
+// word is a word to speak: its spelling, or preset phonemes (spell mode, phonemic input),
+// with optional per-phoneme duration (ms) and pitch (Hz) overrides for singing.
+type word struct {
+	text    string // original spelling (case kept for acronym detection)
+	phones  []string
+	dur, f0 []float64
+	emph    bool
 }
 
 var (
@@ -24,7 +33,7 @@ var (
 	reOrdinal  = regexp.MustCompile(`(?i)\b(\d+)(st|nd|rd|th)\b`)
 	reMinus    = regexp.MustCompile(`(^|[\s(])-(\d)`)
 	reNumber   = regexp.MustCompile(`\d[\d,]*(?:\.\d+)?`)
-	reToken    = regexp.MustCompile(`[A-Za-z]+(?:'[A-Za-z]+)*|\d|[.,;:!?]`)
+	reToken    = regexp.MustCompile(`\p{L}+(?:'\p{L}+)*|\d|[.,;:!?*]`)
 )
 
 var fold = strings.NewReplacer(
@@ -80,6 +89,7 @@ func normalize(s string) string {
 		p := reMoney.FindStringSubmatch(m)
 		return " " + money(p[1], p[2]) + " "
 	})
+	s = reMinus.ReplaceAllString(s, "${1}minus $2")
 	s = reDegree.ReplaceAllStringFunc(s, func(m string) string {
 		p := reDegree.FindStringSubmatch(m)
 		unit := map[string]string{"f": " fahrenheit", "c": " celsius"}[strings.ToLower(p[2])]
@@ -95,36 +105,77 @@ func normalize(s string) string {
 	s = reOrdinal.ReplaceAllStringFunc(s, func(m string) string {
 		return " " + ordinal(cardinal(reOrdinal.FindStringSubmatch(m)[1])) + " "
 	})
-	s = reMinus.ReplaceAllString(s, "${1}minus $2")
 	s = reNumber.ReplaceAllStringFunc(s, func(m string) string { return " " + numberWords(m, true) + " " })
 	return s
 }
 
-// phrases splits normalized text into phrases of words.
-func phrases(s string) []phrase {
+// punctNames are spoken in [:punct all] mode.
+var punctNames = map[byte]string{'.': "period", ',': "comma", ';': "semicolon", ':': "colon",
+	'!': "exclamation point", '?': "question mark"}
+
+// phrases splits normalized text into phrases of words. *word* marks emphasis; with
+// readPunct, punctuation is also spoken.
+func phrases(s string, readPunct bool, L *language) []phrase {
 	var out []phrase
 	cur := phrase{}
+	emph := false
 	afterAbbrev := false // "Dr." : that period isn't a sentence end
+	add := func(ws ...string) {
+		for _, w := range ws {
+			cur.words = append(cur.words, word{text: w, emph: emph})
+		}
+	}
 	for _, tok := range reToken.FindAllString(s, -1) {
 		wasAbbrev := afterAbbrev
 		afterAbbrev = false
 		switch c := tok[0]; {
+		case c == '*':
+			emph = !emph
 		case strings.ContainsRune(".,;:!?", rune(c)):
-			if len(cur.words) == 0 || (c == '.' && wasAbbrev) {
+			if c == '.' && wasAbbrev {
+				continue
+			}
+			if readPunct {
+				add(strings.Fields(punctNames[c])...)
+			}
+			if len(cur.words) == 0 {
 				continue
 			}
 			cur.end = map[byte]byte{'.': '.', '!': '!', '?': '?', ',': ',', ';': ',', ':': ','}[c]
 			out = append(out, cur)
 			cur = phrase{}
 		case c >= '0' && c <= '9':
-			cur.words = append(cur.words, ones[c-'0'])
+			add(L.digits[c-'0'])
 		default:
-			if a, ok := abbreviations[strings.ToLower(tok)]; ok && tok != strings.ToUpper(tok) {
-				cur.words = append(cur.words, strings.Fields(a)...)
+			if a, ok := abbreviations[strings.ToLower(tok)]; ok && L.english && tok != strings.ToUpper(tok) {
+				add(strings.Fields(a)...)
 				afterAbbrev = true
 			} else {
-				cur.words = append(cur.words, tok)
+				add(tok)
 			}
+		}
+	}
+	if len(cur.words) > 0 {
+		out = append(out, cur)
+	}
+	return out
+}
+
+// spellPhrases spells text character by character ([:mode spell on]); punctuation still
+// separates phrases.
+func spellPhrases(text string) []phrase {
+	var out []phrase
+	cur := phrase{}
+	for _, r := range strings.ToLower(text) {
+		switch {
+		case r >= 'a' && r <= 'z':
+			cur.words = append(cur.words, word{phones: spell(string(r))})
+		case r >= '0' && r <= '9':
+			cur.words = append(cur.words, word{text: ones[r-'0']})
+		case strings.ContainsRune(".,;:!?", r) && len(cur.words) > 0:
+			cur.end = byte(r)
+			out = append(out, cur)
+			cur = phrase{}
 		}
 	}
 	if len(cur.words) > 0 {
@@ -136,12 +187,21 @@ func phrases(s string) []phrase {
 // SplitPhrases returns the longest prefix of text that ends a phrase (punctuation followed
 // by whitespace) and the rest, so streamed text can be spoken a phrase at a time.
 func SplitPhrases(text string) (complete, rest string) {
-	for i := len(text) - 2; i >= 0; i-- {
-		if strings.IndexByte(".,;:!?\n", text[i]) >= 0 && unicode.IsSpace(rune(text[i+1])) {
-			return text[:i+1], text[i+1:]
+	cut, depth := -1, 0
+	for i := 0; i+1 < len(text); i++ {
+		switch c := text[i]; {
+		case c == '[':
+			depth++
+		case c == ']' && depth > 0:
+			depth--
+		case depth == 0 && strings.IndexByte(".,;:!?\n", c) >= 0 && unicode.IsSpace(rune(text[i+1])):
+			cut = i // never inside [...], so "[:tone 440, 500]" isn't split
 		}
 	}
-	return "", text
+	if cut < 0 {
+		return "", text
+	}
+	return text[:cut+1], text[cut+1:]
 }
 
 var (

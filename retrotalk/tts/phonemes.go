@@ -29,16 +29,14 @@ type phoneme struct {
 	nasalZero float64 // nasal antiformant (nasals only)
 }
 
+// Noise spectra, set from tune by applyTune.
+var sibilant, palatal, labioDent, dental, labial, alveolar, velar noiseShape
+
+// Fixed spectra for the ach-Laut (velar), ich-Laut (palatal) and uvular r fricatives.
 var (
-	// Levels tuned so frication sits below vowels as in natural speech:
-	// s about -12 dB, sh -8 dB, f and th about -20 dB.
-	sibilant  = noiseShape{f: 5200, bw: 1600, amp: 1.4, bypass: 0.02}
-	palatal   = noiseShape{f: 2800, bw: 1000, amp: 2, bypass: 0.03}
-	labioDent = noiseShape{bypass: 0.4}
-	dental    = noiseShape{f: 6000, bw: 2000, amp: 0.08, bypass: 0.12}
-	labial    = noiseShape{bypass: 0.4}
-	alveolar  = noiseShape{f: 4000, bw: 1500, amp: 2.2}
-	velar     = noiseShape{f: 1900, bw: 600, amp: 2}
+	velarFric   = noiseShape{f: 1500, bw: 1200, amp: 1.2, bypass: 0.05}
+	palatalFric = noiseShape{f: 3600, bw: 1500, amp: 1.4, bypass: 0.03}
+	uvularFric  = noiseShape{f: 1500, bw: 1600, amp: 1.0, bypass: 0.05} // French/German r
 )
 
 // schwa replaces AH, IH and ER targets in unstressed syllables.
@@ -61,32 +59,62 @@ var phonemes = map[string]*phoneme{
 	"AW": {flags: vowel | voiced, f: [3]float64{640, 1230, 2550}, glide: [3]float64{420, 940, 2350}, dur: 260, min: 100, av: 1},
 	"OY": {flags: vowel | voiced, f: [3]float64{550, 960, 2400}, glide: [3]float64{360, 1820, 2450}, dur: 280, min: 150, av: 1},
 
-	"W": {flags: sonorant | voiced, f: [3]float64{290, 610, 2150}, dur: 80, min: 60, av: 0.8},
-	"Y": {flags: sonorant | voiced, f: [3]float64{260, 2070, 3020}, dur: 80, min: 40, av: 0.8},
-	"R": {flags: sonorant | voiced, f: [3]float64{310, 1060, 1380}, dur: 80, min: 30, av: 0.8},
-	"L": {flags: sonorant | voiced, f: [3]float64{310, 1050, 2880}, dur: 80, min: 40, av: 0.8},
+	"W": {flags: sonorant | voiced, f: [3]float64{290, 610, 2150}, dur: 80, min: 60},
+	"Y": {flags: sonorant | voiced, f: [3]float64{260, 2070, 3020}, dur: 80, min: 40},
+	"R": {flags: sonorant | voiced, f: [3]float64{310, 1060, 1380}, dur: 80, min: 30},
+	"L": {flags: sonorant | voiced, f: [3]float64{310, 1050, 2880}, dur: 80, min: 40},
 
-	"M":  {flags: nasal | voiced, f: [3]float64{480, 1270, 2130}, dur: 70, min: 60, av: 0.6, nasalZero: 450},
-	"N":  {flags: nasal | voiced, f: [3]float64{480, 1340, 2470}, dur: 60, min: 50, av: 0.6, nasalZero: 450},
-	"NG": {flags: nasal | voiced, f: [3]float64{480, 2000, 2900}, dur: 95, min: 60, av: 0.6, nasalZero: 450},
+	"M":  {flags: nasal | voiced, f: [3]float64{480, 1270, 2130}, dur: 70, min: 60},
+	"N":  {flags: nasal | voiced, f: [3]float64{480, 1340, 2470}, dur: 60, min: 50},
+	"NG": {flags: nasal | voiced, f: [3]float64{480, 2000, 2900}, dur: 95, min: 60},
 
-	"B": {flags: stop | voiced, f: [3]float64{200, 900, 2100}, dur: 85, min: 60, af: 0.7, noise: labial},
-	"D": {flags: stop | voiced, f: [3]float64{200, 1600, 2600}, dur: 75, min: 50, af: 0.7, noise: alveolar},
-	"G": {flags: stop | voiced, f: [3]float64{200, 1990, 2850}, dur: 80, min: 60, af: 0.7, noise: velar},
-	"P": {flags: stop, f: [3]float64{200, 900, 2100}, dur: 85, min: 50, af: 1, noise: labial},
-	"T": {flags: stop, f: [3]float64{200, 1600, 2600}, dur: 75, min: 50, af: 1, noise: alveolar},
-	"K": {flags: stop, f: [3]float64{200, 1990, 2850}, dur: 80, min: 60, af: 1, noise: velar},
+	"B": {flags: stop | voiced, f: [3]float64{200, 900, 2100}, dur: 85, min: 60, af: 0.7},
+	"D": {flags: stop | voiced, f: [3]float64{200, 1600, 2600}, dur: 75, min: 50, af: 0.7},
+	"G": {flags: stop | voiced, f: [3]float64{200, 1990, 2850}, dur: 80, min: 60, af: 0.7},
+	"P": {flags: stop, f: [3]float64{200, 900, 2100}, dur: 85, min: 50, af: 1},
+	"T": {flags: stop, f: [3]float64{200, 1600, 2600}, dur: 75, min: 50, af: 1},
+	"K": {flags: stop, f: [3]float64{200, 1990, 2850}, dur: 80, min: 60, af: 1},
 
-	"F":  {flags: fricative, f: [3]float64{340, 1100, 2080}, dur: 100, min: 80, af: 0.8, noise: labioDent},
-	"V":  {flags: fricative | voiced, f: [3]float64{340, 1100, 2080}, dur: 60, min: 40, av: 0.5, af: 0.5, noise: labioDent},
-	"TH": {flags: fricative, f: [3]float64{320, 1290, 2540}, dur: 80, min: 60, af: 0.8, noise: dental},
-	"DH": {flags: fricative | voiced, f: [3]float64{320, 1290, 2540}, dur: 50, min: 30, av: 0.5, af: 0.4, noise: dental},
-	"S":  {flags: fricative, f: [3]float64{320, 1390, 2530}, dur: 105, min: 60, af: 1, noise: sibilant},
-	"Z":  {flags: fricative | voiced, f: [3]float64{320, 1390, 2530}, dur: 75, min: 40, av: 0.5, af: 0.6, noise: sibilant},
-	"SH": {flags: fricative, f: [3]float64{300, 1840, 2750}, dur: 105, min: 80, af: 1, noise: palatal},
-	"ZH": {flags: fricative | voiced, f: [3]float64{300, 1840, 2750}, dur: 70, min: 40, av: 0.5, af: 0.6, noise: palatal},
-	"CH": {flags: affricate, f: [3]float64{300, 1840, 2750}, dur: 70, min: 50, af: 1, noise: palatal},
-	"JH": {flags: affricate | voiced, f: [3]float64{300, 1840, 2750}, dur: 70, min: 50, af: 0.6, noise: palatal},
+	"F":  {flags: fricative, f: [3]float64{340, 1100, 2080}, dur: 100, min: 80, af: 0.8},
+	"V":  {flags: fricative | voiced, f: [3]float64{340, 1100, 2080}, dur: 60, min: 40},
+	"TH": {flags: fricative, f: [3]float64{320, 1290, 2540}, dur: 80, min: 60, af: 0.8},
+	"DH": {flags: fricative | voiced, f: [3]float64{320, 1290, 2540}, dur: 50, min: 30},
+	"S":  {flags: fricative, f: [3]float64{320, 1390, 2530}, dur: 105, min: 60, af: 1},
+	"Z":  {flags: fricative | voiced, f: [3]float64{320, 1390, 2530}, dur: 75, min: 40},
+	"SH": {flags: fricative, f: [3]float64{300, 1840, 2750}, dur: 105, min: 80, af: 1},
+	"ZH": {flags: fricative | voiced, f: [3]float64{300, 1840, 2750}, dur: 70, min: 40},
+	"CH": {flags: affricate, f: [3]float64{300, 1840, 2750}, dur: 70, min: 50, af: 1},
+	"JH": {flags: affricate | voiced, f: [3]float64{300, 1840, 2750}, dur: 70, min: 50, af: 0.6},
 
 	"HH": {flags: aspirate, dur: 80, min: 20},
+
+	"_": {dur: 100, min: 100}, // silence (phonemic input)
+
+	// Other languages. Pure (monophthong) vowels for Spanish, German and French.
+	"A": {flags: vowel | voiced, f: [3]float64{750, 1350, 2500}, dur: 180, min: 80, av: 1},
+	"E": {flags: vowel | voiced, f: [3]float64{420, 2000, 2600}, dur: 160, min: 70, av: 1},
+	"I": {flags: vowel | voiced, f: [3]float64{290, 2250, 2950}, dur: 150, min: 60, av: 1},
+	"O": {flags: vowel | voiced, f: [3]float64{440, 850, 2450}, dur: 170, min: 70, av: 1},
+	"U": {flags: vowel | voiced, f: [3]float64{320, 750, 2300}, dur: 160, min: 60, av: 1},
+	// Front rounded vowels (German ü/ö, French u/eu).
+	"UE": {flags: vowel | voiced, f: [3]float64{290, 1650, 2100}, dur: 150, min: 60, av: 1},
+	"OE": {flags: vowel | voiced, f: [3]float64{430, 1450, 2300}, dur: 160, min: 70, av: 1},
+	// French nasal vowels: the nasal antiformant moves off the pole during the vowel.
+	"AN": {flags: vowel | voiced, f: [3]float64{650, 1050, 2500}, dur: 200, min: 90, av: 1, nasalZero: 700},
+	"ON": {flags: vowel | voiced, f: [3]float64{450, 800, 2500}, dur: 200, min: 90, av: 1, nasalZero: 650},
+	"IN": {flags: vowel | voiced, f: [3]float64{600, 1600, 2500}, dur: 200, min: 90, av: 1, nasalZero: 750},
+	// British vowels: LOT, NURSE, GOAT.
+	"OH": {flags: vowel | voiced, f: [3]float64{580, 880, 2450}, dur: 130, min: 50, av: 1},
+	"UR": {flags: vowel | voiced, f: [3]float64{500, 1450, 2400}, dur: 190, min: 90, av: 1},
+	"OU": {flags: vowel | voiced, f: [3]float64{520, 1300, 2400}, glide: [3]float64{420, 1000, 2350}, dur: 210, min: 80, av: 1},
+	// Fricatives: German ach-Laut (also Spanish j) and ich-Laut.
+	"X":  {flags: fricative, f: [3]float64{300, 1300, 2500}, dur: 100, min: 70, af: 0.8},
+	"CX": {flags: fricative, f: [3]float64{300, 2100, 2900}, dur: 100, min: 70, af: 0.8},
+	// Affricates: German z/tz and pf.
+	"TS": {flags: affricate, f: [3]float64{300, 1600, 2600}, dur: 90, min: 60, af: 1},
+	"PF": {flags: affricate, f: [3]float64{300, 1000, 2100}, dur: 90, min: 60, af: 1},
+	// Spanish tap (pero) and trill (perro); uvular r (German, French).
+	"DX": {flags: stop | voiced, f: [3]float64{300, 1600, 2600}, dur: 25, min: 20, af: 0.15},
+	"RR": {flags: sonorant | voiced, f: [3]float64{300, 1500, 2500}, dur: 90, min: 60},
+	"RU": {flags: fricative | voiced, f: [3]float64{500, 1250, 2400}, dur: 70, min: 40}, // voiced uvular fricative (levels tuned with the other voiced fricatives)
 }

@@ -2,9 +2,11 @@ package tts
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -21,6 +23,7 @@ func TestNormalize(t *testing.T) {
 		"in 1984":              "in nineteen eighty four",
 		"1,250 watts":          "one thousand two hundred fifty watts",
 		"-5 degrees":           "minus five degrees",
+		"it is -5°F":           "it is minus five degrees fahrenheit",
 		"3.14":                 "three point one four",
 		"don’t":                "don't",
 		"café":                 "cafe",
@@ -36,9 +39,9 @@ func TestNormalize(t *testing.T) {
 }
 
 func TestPhrases(t *testing.T) {
-	ps := phrases(normalize("Dr. Smith is here, is he? Yes!"))
+	ps := phrases(normalize("Dr. Smith is here, is he? Yes!"), false, Languages["en-US"])
 	if len(ps) != 3 || ps[0].end != ',' || ps[1].end != '?' || ps[2].end != '!' ||
-		strings.Join(ps[0].words, " ") != "doctor Smith is here" {
+		texts(ps[0]) != "doctor Smith is here" {
 		t.Fatalf("%+v", ps)
 	}
 	if c, r := SplitPhrases("Hello there. How are y"); c != "Hello there." || r != " How are y" {
@@ -125,14 +128,54 @@ func TestWriteSamples(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// TTS_TUNE=file.json overrides tune constants, for optimizing against recognizers.
+	if path := os.Getenv("TTS_TUNE"); path != "" {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var over map[string]float64
+		if err := json.Unmarshal(b, &over); err != nil {
+			t.Fatal(err)
+		}
+		if err := Override(over); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, line := range strings.Split(strings.TrimSpace(string(lines)), "\n") {
 		parts := strings.SplitN(strings.TrimSpace(line), "|", 3)
-		v, ok := Presets[parts[1]]
-		if !ok {
-			v, _ = Presets["paul"].With(parts[1])
+		v, err := sampleVoice(parts[1])
+		if err != nil {
+			t.Fatal(err)
 		}
 		writeWAV(t, filepath.Join(dir, parts[0]+".wav"), pcm(t, parts[2], v))
 	}
+}
+
+// sampleVoice parses a voice field: a preset name, settings for paul ("ap 90 pr 0"), or
+// "base:settings@rate" (e.g. "betty:ap 150 pq 80@190"), optionally ending "#lang" ("paul#es-ES").
+func sampleVoice(field string) (Voice, error) {
+	field, lang, _ := strings.Cut(field, "#")
+	if v, ok := Presets[field]; ok {
+		v.Lang = lang
+		return v, nil
+	}
+	v, err := sampleVoiceSettings(field)
+	v.Lang = lang
+	return v, err
+}
+
+func sampleVoiceSettings(field string) (Voice, error) {
+	field, rate, _ := strings.Cut(field, "@")
+	base, settings, found := strings.Cut(field, ":")
+	if !found {
+		base, settings = "paul", field
+	}
+	v, err := Presets[base].With(settings)
+	if r, e := strconv.ParseFloat(rate, 64); e == nil {
+		v.Rate = r
+	}
+	return v, err
 }
 
 func writeWAV(t *testing.T, path string, s []int16) {

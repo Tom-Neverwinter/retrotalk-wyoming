@@ -15,6 +15,7 @@ import (
 	"os"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Tom-Neverwinter/retrotalk-wyoming/tts"
@@ -28,12 +29,13 @@ const (
 
 var format = map[string]int{"rate": tts.SampleRate, "width": 2, "channels": 1}
 
-// voice is a named speaker: a built-in preset plus optional settings and rate.
+// voice is a named speaker: a built-in preset plus optional settings, rate and language.
 type voice struct {
 	Name     string `json:"name"`
 	Base     string `json:"base"`
 	Settings string `json:"settings"`
 	Rate     int    `json:"rate"`
+	Language string `json:"language"` // us uk gr sp la fr (or a BCP 47 tag); "" = us
 	desc     string
 	tts      tts.Voice
 }
@@ -49,10 +51,11 @@ func envOr(key, def string) string {
 // A missing file (running outside Home Assistant) means defaults.
 func loadVoices(path string) ([]voice, voice, error) {
 	o := struct {
-		Voice        string  `json:"voice"`
-		Rate         int     `json:"rate"`
-		CustomVoices []voice `json:"custom_voices"`
-	}{Voice: "paul"}
+		Voice        string   `json:"voice"`
+		Rate         int      `json:"rate"`
+		Languages    []string `json:"languages"`
+		CustomVoices []voice  `json:"custom_voices"`
+	}{Voice: "paul", Languages: []string{"us"}}
 	b, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		b, err = []byte("{}"), nil
@@ -68,9 +71,19 @@ func loadVoices(path string) ([]voice, voice, error) {
 		names = append(names, n)
 	}
 	sort.Strings(names)
+	// Built-ins for each enabled language: paul, betty... for US English; paul_gr... otherwise.
 	var vs []voice
-	for _, n := range names {
-		vs = append(vs, voice{Name: n, Base: n, desc: n})
+	for _, code := range o.Languages {
+		if tts.LanguageTag(code) == "" {
+			return nil, voice{}, fmt.Errorf("unknown language %q", code)
+		}
+		for _, n := range names {
+			name := n
+			if code != "us" {
+				name += "_" + code
+			}
+			vs = append(vs, voice{Name: name, Base: n, Language: code, desc: n})
+		}
 	}
 	for _, c := range o.CustomVoices {
 		c.desc = fmt.Sprintf("%s (%s %s)", c.Name, c.Base, c.Settings)
@@ -92,12 +105,22 @@ func loadVoices(path string) ([]voice, voice, error) {
 		if rate := cmp(v.Rate, o.Rate); rate > 0 {
 			v.tts.Rate = float64(rate)
 		}
+		if v.tts.Lang = tts.LanguageTag(cmpStr(v.Language, "us")); v.tts.Lang == "" {
+			return nil, voice{}, fmt.Errorf("voice %q: unknown language %q", v.Name, v.Language)
+		}
 	}
 	i := slices.IndexFunc(vs, func(v voice) bool { return v.Name == o.Voice })
 	if i < 0 {
 		return nil, voice{}, fmt.Errorf("default voice %q is not a built-in or custom voice", o.Voice)
 	}
 	return vs, vs[i], nil
+}
+
+func cmpStr(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 // cmp returns the first non-zero value.
@@ -113,7 +136,7 @@ func info(vs []voice) map[string]any {
 	tv := make([]map[string]any, len(vs))
 	for i, v := range vs {
 		tv[i] = map[string]any{"name": v.Name, "description": v.desc, "attribution": attr,
-			"installed": true, "version": "1", "languages": []string{"en-US"}}
+			"installed": true, "version": "1", "languages": []string{v.tts.Lang}}
 	}
 	none := []any{}
 	return map[string]any{
@@ -185,8 +208,8 @@ func (c *conn) send(typ string, data any, payload []byte) error {
 }
 
 // speak synthesizes text and streams it phrase by phrase, opening with audio-start once.
-func (c *conn) speak(text string, v voice) error {
-	return tts.Speak(text, v.tts, func(pcm []byte) error {
+func (c *conn) speak(sess *tts.Session, text string) error {
+	return sess.Speak(text, func(pcm []byte) error {
 		if !c.started {
 			if err := c.send("audio-start", format, nil); err != nil {
 				return err
@@ -205,9 +228,40 @@ func (c *conn) speak(text string, v voice) error {
 }
 
 type server struct {
-	voices []voice
-	def    voice
-	info   map[string]any
+	voices  []voice
+	def     voice
+	info    map[string]any
+	speaker *tts.Speaker // all voices for [:name x], plus user pronunciations
+}
+
+func newServer(vs []voice, def voice, lexicon map[string][]string) *server {
+	sp := &tts.Speaker{Voices: map[string]tts.Voice{}, Lexicon: lexicon}
+	for _, v := range vs {
+		sp.Voices[v.Name] = v.tts
+	}
+	return &server{voices: vs, def: def, info: info(vs), speaker: sp}
+}
+
+// loadLexicon reads the pronunciations option: [{"word": "Nguyen", "say": "new win"}, ...].
+// "say" is a respelling in ordinary words or phonemes in brackets ("[n w ih1 n]").
+func loadLexicon(path string) (map[string][]string, error) {
+	var o struct {
+		Pronunciations []struct{ Word, Say string } `json:"pronunciations"`
+	}
+	if b, err := os.ReadFile(path); err == nil {
+		if err := json.Unmarshal(b, &o); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+	}
+	lex := map[string][]string{}
+	for _, p := range o.Pronunciations {
+		phones, err := tts.Pronounce(p.Say)
+		if err != nil {
+			return nil, fmt.Errorf("pronunciation for %q: %w", p.Word, err)
+		}
+		lex[strings.ToLower(p.Word)] = phones
+	}
+	return lex, nil
 }
 
 type synthReq struct {
@@ -240,8 +294,8 @@ func (s *server) handle(nc net.Conn) {
 	defer nc.Close()
 	c := &conn{w: bufio.NewWriter(nc)}
 	r := bufio.NewReaderSize(nc, maxHeaderLine)
-	var stream *voice  // set between synthesize-start and synthesize-stop
-	var pending string // streamed text not yet ending a phrase
+	var stream *tts.Session // set between synthesize-start and synthesize-stop
+	var pending string      // streamed text not yet ending a phrase
 	for {
 		typ, data, err := readEvent(r)
 		if err == nil {
@@ -255,25 +309,24 @@ func (s *server) handle(nc net.Conn) {
 				}
 				if req, err = decode(data); err == nil {
 					c.started = false
-					if err = c.speak(req.Text, s.voice(req)); err == nil {
+					if err = c.speak(s.speaker.Session(s.voice(req).tts), req.Text); err == nil {
 						err = c.send("audio-stop", map[string]any{}, nil)
 					}
 				}
 			case "synthesize-start":
 				if req, err = decode(data); err == nil {
-					v := s.voice(req)
-					stream, pending, c.started = &v, "", false
+					stream, pending, c.started = s.speaker.Session(s.voice(req).tts), "", false
 				}
 			case "synthesize-chunk":
 				if req, err = decode(data); err == nil && stream != nil {
 					// Speak each completed phrase as soon as it arrives.
 					var done string
 					done, pending = tts.SplitPhrases(pending + req.Text)
-					err = c.speak(done, *stream)
+					err = c.speak(stream, done)
 				}
 			case "synthesize-stop":
 				if stream != nil {
-					if err = c.speak(pending, *stream); err == nil {
+					if err = c.speak(stream, pending); err == nil {
 						err = c.send("audio-stop", map[string]any{}, nil)
 					}
 					stream, pending = nil, ""
@@ -318,18 +371,23 @@ func discover(port string) {
 }
 
 func main() {
-	vs, def, err := loadVoices(envOr("OPTIONS_PATH", "/data/options.json"))
+	opts := envOr("OPTIONS_PATH", "/data/options.json")
+	vs, def, err := loadVoices(opts)
+	if err != nil {
+		log.Fatal(err)
+	}
+	lexicon, err := loadLexicon(opts)
 	if err != nil {
 		log.Fatal(err)
 	}
 	tts.LoadDictionary()
-	s := &server{voices: vs, def: def, info: info(vs)}
+	s := newServer(vs, def, lexicon)
 	port := envOr("PORT", "10205")
 	ln, err := net.Listen("tcp", ":"+port)
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("Wyoming TTS server on %s, %d voices, default %q", ln.Addr(), len(vs), def.Name)
+	log.Printf("Wyoming TTS server on %s, %d voices, default %q, %d pronunciations", ln.Addr(), len(vs), def.Name, len(lexicon))
 	go discover(port)
 	for {
 		c, err := ln.Accept()

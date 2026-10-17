@@ -21,14 +21,19 @@ Retrotalk is a local text-to-speech add-on with the robotic charm of 1980s forma
 synthesizers. The speech engine is written from scratch in Go and runs entirely on your Home
 Assistant machine: no cloud, no internet, no external programs.
 
-- 9 built-in voices, plus **your own custom voices** set in the add-on's Configuration tab
-- Bundled impression voices: `kitt` (default) and `hal`
+- **Six languages:** US and UK English, Spanish (Spain and Latin America), German, French
+- 9 built-in voices per language, plus **your own custom voices** set in the Configuration tab
+- **Character voices** fitted to measurements of reference recordings: `kitt` (default), `hal`,
+  `glados`, `turret`, `jarvis`, `narrator`, `robot`
+- **DECtalk-style inline commands:** `[:rate]`, `[:name hal]`, `[:dv ap 90]`, `[:lang sp]`,
+  pauses, spelling, tones and telephone dialing; **phonemic input and singing**
+- **Pronunciations** option to fix names and words; `*emphasis*`
+- 26 voice settings (DECtalk's `[:dv]` codes plus nasality and autotune pitch steps)
 - Streaming: each phrase plays as soon as it's ready; accepts streamed text from voice assistants
 - Reads numbers, times, temperatures, money, percentages and abbreviations naturally
 - Auto-discovered by Home Assistant's Wyoming integration
 - **Announce blueprint:** speak everywhere, in chosen rooms, or on chosen speakers, with one
   designated speaker per room, plus mute switch, quiet hours, priority alerts and volume
-- English only for now
 
 ## Install
 
@@ -45,20 +50,34 @@ Full docs (options, making custom voices, announcements) are in
 
 | Stage | What it does | Based on |
 |---|---|---|
-| Text normalization | Numbers, times, °F, $, %, ordinals, abbreviations into words | — |
-| Pronunciation | Dictionary lookup, letter-to-sound rules for unknown words | [CMU Pronouncing Dictionary](https://github.com/cmusphinx/cmudict) |
+| Text normalization | Numbers, times, °F, $, %, ordinals, abbreviations into words, per language | — |
+| Pronunciation | English: dictionary lookup, letter-to-sound rules for unknown words; UK English as a transform of it. Spanish, German, French: spelling rules | [CMU Pronouncing Dictionary](https://github.com/cmusphinx/cmudict) |
 | Prosody | Segment durations, stress, hat-pattern pitch contour | Klatt's duration rules (Allen, Hunnicutt & Klatt 1987) |
 | Synthesis | Cascade/parallel formant synthesizer, 16 kHz | Klatt (1980); Klatt & Klatt (1990) voicing source |
 
-Intelligibility is measured with Whisper (speech recognition) on 20 Harvard sentences plus
-10 Home Assistant announcements: about **18-32% word error rate** depending on the voice,
-against 2% for a modern commercial voice. It's understandable, and very retro.
+Intelligibility is measured by having speech recognizers transcribe it: NVIDIA Parakeet
+models (Phonon-2, Redux) run with [audio.cpp](https://github.com/0xShug0/audio.cpp), and
+Whisper. The engine's acoustic constants (`tts/tune.go`) were tuned automatically against
+150 LibriSpeech sentences and checked on 150 others it never saw:
+
+| | Word error rate |
+|---|---|
+| English, held-out sentences, mean of 3 recognizers | **17%** (32% before tuning; about 50% at the start) |
+| All 9 built-in English voices | 14-24% |
+| Spanish (Spain / Latin America) | 15-17% |
+| German | 17-37% |
+| French | 50-73% (experimental) |
+| A modern commercial voice, for reference | 2% |
+
+Non-English numbers use multilingual Whisper, which is more forgiving than the Parakeet
+models. It's understandable, and very retro.
 
 ## Repository layout
 
 | Path | What |
 |---|---|
-| `retrotalk/tts/` | The speech engine (Go, standard library only) |
+| `retrotalk/tts/` | The speech engine (Go, standard library only): `klatt.go` synthesizer, `prosody.go`, `text.go`, `lexicon.go`, `lang.go` languages, `commands.go` inline commands, `tune.go` tuned constants |
+| `retrotalk/cmd/preview/` | Local web page to listen to voices and settings: `cd retrotalk && go run ./cmd/preview`, then open http://localhost:8099 |
 | `retrotalk/main.go` | Wyoming server: voices, streaming, Home Assistant discovery |
 | `retrotalk/config.yaml` | Add-on manifest and options schema |
 | `retrotalk/translations/en.yaml` | UI labels for the options |
@@ -80,9 +99,15 @@ Run the tests with `cd retrotalk && go test ./...`.
   seconds, auto-discovery, all 12 voices, speech generated through `tts.retrotalk`;
   about 21 MB of memory
 - [ ] Announce blueprint verified on real speakers
-- [ ] Better intelligibility: velar consonants, R vs L, female and child voices
-- [ ] More natural intonation (question and list contours, emphasis)
-- [ ] Other languages (letter-to-sound rules for Spanish and German are fairly regular)
+- [x] Engine constants tuned automatically against speech recognizers (held-out checked)
+- [x] Velar consonants and R vs L (now among the clearest sounds); female and child voices
+  as clear as male
+- [x] Intonation: yes/no questions rise, wh-questions fall, list continuations, downstep,
+  livelier exclamations, `*emphasis*`
+- [x] Languages: UK English, Spanish x2, German, French; character voices; DECtalk-style
+  commands, phonemes and singing; pronunciations; 26 voice settings
+- [ ] French: still experimental (about half of words misrecognized)
+- [ ] Hardest remaining sounds: th (heard as f), ch/jh, the -ing ending
 
 ## History
 
