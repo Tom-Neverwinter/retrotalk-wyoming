@@ -1,10 +1,9 @@
-// Wyoming TTS server that shells out to DECtalk's `say`.
+// Wyoming TTS server that streams audio from DECtalk's `say`.
 package main
 
 import (
 	"bufio"
 	"bytes"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,19 +14,23 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"slices"
+	"sync"
 	"time"
 )
 
 const (
 	maxDataLength = 1 << 20  // client-supplied JSON is tiny; refuse anything absurd
 	maxHeaderLine = 64 << 10 // bufio buffer size = longest header line accepted
+
+	// say's default encoding (-e 1): 16-bit mono 11025 Hz, host byte order (little-endian on amd64/aarch64).
+	sampleRate, sampleWidth, sampleChannels = 11025, 2, 1
 )
 
 var (
 	dist     = envOr("DECTALK_DIR", "/dectalk")
 	builtins = []string{"paul", "betty", "harry", "frank", "dennis", "kit", "ursula", "rita", "wendy"}
+	format   = map[string]int{"rate": sampleRate, "width": sampleWidth, "channels": sampleChannels}
 )
 
 // voice is a DECtalk speaker: a built-in base voice plus optional [:dv] tweaks and rate.
@@ -110,7 +113,7 @@ func info(vs []voice) map[string]any {
 	none := []any{}
 	return map[string]any{
 		"tts": []any{map[string]any{"name": "dectalk", "description": "DECtalk", "attribution": attr,
-			"installed": true, "version": "4.61", "voices": tv}},
+			"installed": true, "version": "4.61", "voices": tv, "supports_synthesize_streaming": true}},
 		"asr": none, "handle": none, "intent": none, "wake": none, "mic": none, "snd": none,
 	}
 }
@@ -166,51 +169,110 @@ func writeEvent(w *bufio.Writer, typ string, data any, payload []byte) {
 	w.Write(payload)
 }
 
-// ponytail: one `say` process + temp WAV per request; link libtts via cgo if spawn cost matters.
-func synth(text string, v voice) (rate, width, channels int, pcm []byte, err error) {
-	dir, err := os.MkdirTemp("", "dectalk") // /tmp is tmpfs in the add-on, so no SD card writes
-	if err != nil {
-		return
-	}
-	defer os.RemoveAll(dir)
-	out := filepath.Join(dir, "out.wav")
-	cmd := exec.Command("./say", "-fo", out, "-a", v.prefix()+text)
-	cmd.Dir = dist
-	if b, e := cmd.CombinedOutput(); e != nil {
-		err = fmt.Errorf("say: %w: %s", e, b)
-		return
-	}
-	wav, err := os.ReadFile(out)
-	if err != nil {
-		return
-	}
-	return parseWAV(wav)
+// conn serializes writes: during a stream the audio pump writes while the handler reads.
+type conn struct {
+	mu sync.Mutex
+	w  *bufio.Writer
 }
 
-func parseWAV(b []byte) (rate, width, channels int, pcm []byte, err error) {
-	if len(b) < 12 || string(b[:4]) != "RIFF" || string(b[8:12]) != "WAVE" {
-		return 0, 0, 0, nil, errors.New("not a WAV file")
+func (c *conn) send(typ string, data any, payload []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	writeEvent(c.w, typ, data, payload)
+	return c.w.Flush()
+}
+
+func (c *conn) fail(err error) error {
+	c.send("error", map[string]string{"text": err.Error(), "code": "synthesis-failed"}, nil)
+	return err
+}
+
+// session is one running `say`: text goes in on stdin, raw PCM streams out of stdout.
+// ponytail: one process per message; link libtts via cgo if spawn cost ever matters.
+type session struct {
+	cmd   *exec.Cmd
+	stdin io.WriteCloser
+	done  chan error
+}
+
+func (c *conn) start(v voice) (*session, error) {
+	// -c: clause mode, DECtalk speaks each clause as soon as it's complete. "-" must be last.
+	cmd := exec.Command("./say", "-c", "-fo", "stdout:raw", "-")
+	cmd.Dir = dist
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
 	}
-	for i := 12; i+8 <= len(b); {
-		size := int(binary.LittleEndian.Uint32(b[i+4:]))
-		body := b[i+8 : min(i+8+size, len(b))]
-		switch string(b[i : i+4]) {
-		case "fmt ":
-			if len(body) < 16 {
-				return 0, 0, 0, nil, errors.New("short fmt chunk")
-			}
-			channels = int(binary.LittleEndian.Uint16(body[2:]))
-			rate = int(binary.LittleEndian.Uint32(body[4:]))
-			width = int(binary.LittleEndian.Uint16(body[14:])) / 8
-		case "data":
-			pcm = body
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("say: %w", err)
+	}
+	s := &session{cmd: cmd, stdin: stdin, done: make(chan error, 1)}
+	go func() {
+		err := c.pump(stdout)
+		if err != nil {
+			cmd.Process.Kill() // client is gone; don't let say block on a full pipe
 		}
-		i += 8 + size + size&1
+		if werr := cmd.Wait(); werr != nil && err == nil {
+			err = fmt.Errorf("say: %w: %s", werr, bytes.TrimSpace(stderr.Bytes()))
+		}
+		s.done <- err
+	}()
+	if _, err := io.WriteString(stdin, v.prefix()); err != nil {
+		s.kill()
+		return nil, err
 	}
-	if rate == 0 || width == 0 || channels == 0 || pcm == nil {
-		return 0, 0, 0, nil, errors.New("WAV missing fmt or data chunk")
+	return s, nil
+}
+
+// pump relays PCM as say produces it, keeping chunks sample-aligned.
+func (c *conn) pump(stdout io.Reader) error {
+	buf := make([]byte, 8192)
+	started, carry := false, 0
+	for {
+		n, rerr := stdout.Read(buf[carry:])
+		n += carry
+		if even := n &^ (sampleWidth - 1); even > 0 {
+			if !started {
+				if err := c.send("audio-start", format, nil); err != nil {
+					return err
+				}
+				started = true
+			}
+			if err := c.send("audio-chunk", format, buf[:even]); err != nil {
+				return err
+			}
+			carry = copy(buf, buf[even:n])
+		} else {
+			carry = n
+		}
+		if rerr == io.EOF {
+			return nil
+		}
+		if rerr != nil {
+			return rerr
+		}
 	}
-	return
+}
+
+// finish closes the text input, waits for the audio to drain and ends it.
+func (c *conn) finish(s *session) error {
+	s.stdin.Close()
+	if err := <-s.done; err != nil {
+		return c.fail(err)
+	}
+	return c.send("audio-stop", map[string]any{}, nil)
+}
+
+func (s *session) kill() {
+	s.cmd.Process.Kill()
+	s.stdin.Close()
+	<-s.done
 }
 
 type server struct {
@@ -219,59 +281,89 @@ type server struct {
 	info   map[string]any
 }
 
-func (s *server) speak(w *bufio.Writer, data [][]byte) error {
-	var req struct {
-		Text  string `json:"text"`
-		Voice *struct {
-			Name string `json:"name"`
-		} `json:"voice"`
-	}
-	for _, d := range data {
-		if err := json.Unmarshal(d, &req); err != nil {
-			return err
-		}
-	}
-	v := s.def
-	if req.Voice != nil {
-		if i := slices.IndexFunc(s.voices, func(x voice) bool { return x.Name == req.Voice.Name }); i >= 0 {
-			v = s.voices[i]
-		}
-	}
-	rate, width, ch, pcm, err := synth(req.Text, v)
-	if err != nil {
-		writeEvent(w, "error", map[string]string{"text": err.Error(), "code": "synthesis-failed"}, nil)
-		w.Flush()
-		return err
-	}
-	f := map[string]int{"rate": rate, "width": width, "channels": ch}
-	writeEvent(w, "audio-start", f, nil)
-	step := rate * width * ch // 1s chunks
-	for i := 0; i < len(pcm); i += step {
-		writeEvent(w, "audio-chunk", f, pcm[i:min(i+step, len(pcm))])
-	}
-	writeEvent(w, "audio-stop", map[string]any{}, nil)
-	return nil
+type synthReq struct {
+	Text  string `json:"text"`
+	Voice *struct {
+		Name string `json:"name"`
+	} `json:"voice"`
 }
 
-func (s *server) handle(c net.Conn) {
-	defer c.Close()
-	r, w := bufio.NewReaderSize(c, maxHeaderLine), bufio.NewWriter(c)
+func decode(data [][]byte) (synthReq, error) {
+	var req synthReq
+	for _, d := range data {
+		if err := json.Unmarshal(d, &req); err != nil {
+			return req, err
+		}
+	}
+	return req, nil
+}
+
+func (s *server) voice(req synthReq) voice {
+	if req.Voice != nil {
+		if i := slices.IndexFunc(s.voices, func(v voice) bool { return v.Name == req.Voice.Name }); i >= 0 {
+			return s.voices[i]
+		}
+	}
+	return s.def
+}
+
+func (s *server) handle(nc net.Conn) {
+	c := &conn{w: bufio.NewWriter(nc)}
+	r := bufio.NewReaderSize(nc, maxHeaderLine)
+	var stream *session // set between synthesize-start and synthesize-stop
+	defer func() {
+		nc.Close()
+		if stream != nil {
+			stream.kill()
+		}
+	}()
 	for {
 		typ, data, err := readEvent(r)
 		if err == nil {
+			var req synthReq
 			switch typ {
 			case "describe":
-				writeEvent(w, "info", s.info, nil)
+				err = c.send("info", s.info, nil)
 			case "synthesize":
-				err = s.speak(w, data)
+				if stream != nil {
+					break // inside a stream this is only a compatibility copy of the chunks
+				}
+				if req, err = decode(data); err == nil {
+					var one *session
+					if one, err = c.start(s.voice(req)); err != nil {
+						err = c.fail(err)
+					} else if _, err = io.WriteString(one.stdin, req.Text); err != nil {
+						one.kill()
+					} else {
+						err = c.finish(one)
+					}
+				}
+			case "synthesize-start":
+				if stream != nil {
+					stream.kill()
+				}
+				if req, err = decode(data); err == nil {
+					if stream, err = c.start(s.voice(req)); err != nil {
+						err = c.fail(err)
+					}
+				}
+			case "synthesize-chunk":
+				if req, err = decode(data); err == nil && stream != nil {
+					_, err = io.WriteString(stream.stdin, req.Text)
+				}
+			case "synthesize-stop":
+				if stream != nil {
+					err = c.finish(stream)
+					stream = nil
+				}
+				if err == nil {
+					err = c.send("synthesize-stopped", map[string]any{}, nil)
+				}
 			}
-		}
-		if err == nil {
-			err = w.Flush()
 		}
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
-				log.Printf("%s: %v", c.RemoteAddr(), err)
+				log.Printf("%s: %v", nc.RemoteAddr(), err)
 			}
 			return
 		}

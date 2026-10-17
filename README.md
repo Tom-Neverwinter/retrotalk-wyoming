@@ -9,6 +9,8 @@ speech synthesizer as a local [Wyoming](https://github.com/rhasspy/wyoming) text
 server. No cloud, no internet needed once installed.
 
 - 9 built-in DECtalk voices, plus **your own custom voices** set in the add-on's Configuration tab
+- Bundled impression voices: `kitt` (default) and `hal`
+- Streaming: audio starts playing before the whole message is synthesized
 - Default voice and speaking rate configurable in the UI
 - Auto-discovered by Home Assistant's Wyoming integration
 - **Announce blueprint:** speak everywhere, in chosen rooms, or on chosen speakers, with one
@@ -29,7 +31,7 @@ Full docs (options, making custom voices, announcements) are in
 
 | Path | What |
 |---|---|
-| `dectalk/main.go` | Wyoming server in Go (stdlib only). Runs DECtalk's `say` per request and streams the PCM back. |
+| `dectalk/main.go` | Wyoming server in Go (stdlib only). Pipes text into DECtalk's `say` and streams its raw PCM back as it's produced. |
 | `dectalk/config.yaml` | Add-on manifest and options schema |
 | `dectalk/translations/en.yaml` | UI labels for the options |
 | `dectalk/Dockerfile` | Builds DECtalk from upstream and checks it can produce a WAV |
@@ -48,8 +50,10 @@ Run the tests with `cd dectalk && go test ./...`.
 - [ ] Verified discovery and blueprint on a live Home Assistant
 - [ ] Prebuilt images (currently builds on your device)
 - [ ] Pin the DECtalk source to a known-good commit
-- [ ] Keep DECtalk resident (cgo/libtts) instead of one process per request
-- [ ] Streaming synthesis (`synthesize-start` / `synthesize-chunk`)
+- [x] Streaming audio out (no temp files) and streaming text in (`synthesize-start` / `synthesize-chunk`)
+- [x] Bundled `kitt` (default) and `hal` impression voices
+- [ ] Tune `kitt` / `hal` by ear on real DECtalk output
+- [ ] Keep DECtalk resident (cgo/libtts) instead of one process per message
 - [ ] Other DECtalk languages (Spanish, German, …)
 
 ## Licensing

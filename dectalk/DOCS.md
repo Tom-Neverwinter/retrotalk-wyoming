@@ -37,6 +37,20 @@ Home Assistant sees new voices.
 | `wendy` | Whispering Wendy: breathy female |
 | `kit` | Kit the Kid: child |
 
+## Bundled custom voices
+
+These ship as defaults in **Custom voices**, so you can edit or delete them there.
+They are DECtalk *impressions* of famous fictional AI voices, not recordings or clones.
+
+| Voice | Inspired by | How it's tuned |
+|---|---|---|
+| `kitt` (**default**) | KITT, *Knight Rider* | Crisp and bright, lively pitch, brisk 185 wpm |
+| `hal` | HAL 9000, *2001: A Space Odyssey* | Low, calm, smooth, narrow pitch range, unhurried 150 wpm |
+| `robot` | Classic monotone robot | Flat pitch |
+
+Existing installs keep their saved options. To get these after an update, copy them in from
+the list below or use **⋮ → Reset to defaults** on the Configuration tab.
+
 ## Making more voices
 
 A custom voice is a **base** voice plus DECtalk **design-voice** settings, written as
@@ -44,6 +58,14 @@ A custom voice is a **base** voice plus DECtalk **design-voice** settings, writt
 
 ```yaml
 custom_voices:
+  - name: kitt
+    base: paul
+    settings: ap 125 pr 120 ri 70 hs 95 as 70
+    rate: 185
+  - name: hal
+    base: paul
+    settings: ap 95 pr 35 sm 70 hs 105 as 30
+    rate: 150
   - name: robot
     base: paul
     settings: pr 0 ap 90      # flat pitch
@@ -130,3 +152,13 @@ data:
 ```
 
 Home Assistant caches generated speech, so repeating the same message is instant.
+
+## Streaming
+
+Audio is streamed: DECtalk writes raw samples to a pipe and the add-on forwards them as they
+are produced, so playback can start before the whole message is synthesized. Nothing is
+written to disk.
+
+The add-on also accepts **streamed text** (Wyoming `synthesize-start` / `synthesize-chunk`),
+which Home Assistant uses when a voice assistant's LLM is still writing its reply. DECtalk runs
+in clause mode, speaking each clause as soon as it is complete.

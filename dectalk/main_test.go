@@ -2,42 +2,44 @@ package main
 
 import (
 	"bufio"
-	"bytes"
-	"encoding/binary"
 	"encoding/json"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"testing"
 )
 
-func TestParseWAV(t *testing.T) {
-	fmtChunk := make([]byte, 16)
-	binary.LittleEndian.PutUint16(fmtChunk[0:], 1)     // PCM
-	binary.LittleEndian.PutUint16(fmtChunk[2:], 1)     // channels
-	binary.LittleEndian.PutUint32(fmtChunk[4:], 11025) // rate
-	binary.LittleEndian.PutUint16(fmtChunk[14:], 16)   // bits
-	var b bytes.Buffer
-	b.WriteString("RIFF\x00\x00\x00\x00WAVE")
-	chunk := func(id string, body []byte) {
-		b.WriteString(id)
-		binary.Write(&b, binary.LittleEndian, uint32(len(body)))
-		b.Write(body)
-		if len(body)%2 == 1 {
-			b.WriteByte(0)
+// With FAKE_SAY set, the test binary stands in for DECtalk's say: it checks the args,
+// logs stdin to $FAKE_SAY and writes one 16-bit sample per input byte to stdout.
+func TestMain(m *testing.M) {
+	if log := os.Getenv("FAKE_SAY"); log != "" {
+		if !slices.Equal(os.Args[1:], []string{"-c", "-fo", "stdout:raw", "-"}) {
+			os.Stderr.WriteString("bad args")
+			os.Exit(2)
 		}
+		in, _ := io.ReadAll(os.Stdin)
+		os.WriteFile(log, in, 0o644)
+		os.Stdout.Write(make([]byte, 2*len(in)))
+		os.Exit(0)
 	}
-	chunk("fmt ", fmtChunk)
-	chunk("LIST", []byte("odd")) // odd-sized chunk must be skipped with its pad byte
-	chunk("data", []byte{1, 2, 3, 4})
+	os.Exit(m.Run())
+}
 
-	rate, width, ch, pcm, err := parseWAV(b.Bytes())
-	if err != nil || rate != 11025 || width != 2 || ch != 1 || !bytes.Equal(pcm, []byte{1, 2, 3, 4}) {
-		t.Fatalf("got %d %d %d %v %v", rate, width, ch, pcm, err)
+func fakeSay(t *testing.T) (log string) {
+	dist = t.TempDir()
+	exe, _ := os.Executable()
+	b, _ := os.ReadFile(exe)
+	name := "say"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
 	}
-	if _, _, _, _, err := parseWAV([]byte("nope")); err == nil {
-		t.Fatal("expected error for non-WAV")
-	}
+	os.WriteFile(filepath.Join(dist, name), b, 0o755)
+	log = filepath.Join(dist, "stdin.log")
+	t.Setenv("FAKE_SAY", log)
+	return log
 }
 
 func TestLoadVoices(t *testing.T) {
@@ -64,26 +66,89 @@ func TestLoadVoices(t *testing.T) {
 	}
 }
 
-func TestDescribeRoundTrip(t *testing.T) {
+// exchange sends events like Home Assistant and collects replies until stop.
+func exchange(t *testing.T, send []string, stop string) (types []string, audio int) {
+	t.Helper()
 	vs, def, _ := loadVoices("")
 	s := &server{voices: vs, def: def, info: info(vs)}
 	client, server := net.Pipe()
 	go s.handle(server)
 	defer client.Close()
+	go func() {
+		for _, e := range send {
+			client.Write([]byte(e + "\n"))
+		}
+	}()
+	r := bufio.NewReader(client)
+	for {
+		h, err := r.ReadBytes('\n')
+		if err != nil {
+			t.Fatalf("read after %v: %v", types, err)
+		}
+		var ev struct {
+			Type          string `json:"type"`
+			DataLength    int    `json:"data_length"`
+			PayloadLength int    `json:"payload_length"`
+		}
+		json.Unmarshal(h, &ev)
+		io.CopyN(io.Discard, r, int64(ev.DataLength))
+		io.CopyN(io.Discard, r, int64(ev.PayloadLength))
+		if ev.PayloadLength%2 != 0 {
+			t.Fatalf("odd audio chunk %d", ev.PayloadLength)
+		}
+		if len(types) == 0 || types[len(types)-1] != ev.Type {
+			types = append(types, ev.Type) // collapse runs of audio-chunk
+		}
+		audio += ev.PayloadLength
+		if ev.Type == stop || ev.Type == "error" {
+			return types, audio
+		}
+	}
+}
 
-	// Python wyoming sends data as a separate blob after the header.
-	client.Write([]byte(`{"type":"describe","data_length":2}` + "\n{}"))
-	typ, data, err := readEvent(bufio.NewReader(client))
-	if err != nil || typ != "info" || len(data) != 1 {
-		t.Fatalf("got %q %v %v", typ, data, err)
+func TestDescribe(t *testing.T) {
+	// Python wyoming sends data as a separate blob after the header ("{}" + exchange's newline).
+	types, _ := exchange(t, []string{`{"type":"describe","data_length":3}` + "\n{}"}, "info")
+	if !slices.Equal(types, []string{"info"}) {
+		t.Fatal(types)
 	}
-	var got struct {
-		TTS []struct {
-			Name   string                  `json:"name"`
-			Voices []struct{ Name string } `json:"voices"`
-		} `json:"tts"`
+}
+
+func TestSynthesize(t *testing.T) {
+	log := fakeSay(t)
+	types, audio := exchange(t, []string{`{"type":"synthesize","data":{"text":"hello","voice":{"name":"kit"}}}`}, "audio-stop")
+	want := "[:name kit] hello"
+	if got, _ := os.ReadFile(log); string(got) != want {
+		t.Fatalf("say got %q", got)
 	}
-	if err := json.Unmarshal(data[0], &got); err != nil || got.TTS[0].Name != "dectalk" || len(got.TTS[0].Voices) != len(builtins) {
-		t.Fatalf("bad info: %s (%v)", data[0], err)
+	if !slices.Equal(types, []string{"audio-start", "audio-chunk", "audio-stop"}) || audio != 2*len(want) {
+		t.Fatalf("%v, %d bytes", types, audio)
+	}
+}
+
+func TestStreaming(t *testing.T) {
+	log := fakeSay(t)
+	// Home Assistant's order: start, chunks, a compatibility synthesize, stop.
+	types, audio := exchange(t, []string{
+		`{"type":"synthesize-start","data":{"voice":{"name":"betty"}}}`,
+		`{"type":"synthesize-chunk","data":{"text":"Hello there. "}}`,
+		`{"type":"synthesize-chunk","data":{"text":"General Kenobi."}}`,
+		`{"type":"synthesize","data":{"text":"Hello there. General Kenobi."}}`,
+		`{"type":"synthesize-stop"}`,
+	}, "synthesize-stopped")
+	want := "[:name betty] Hello there. General Kenobi."
+	if got, _ := os.ReadFile(log); string(got) != want {
+		t.Fatalf("say got %q", got)
+	}
+	if !slices.Equal(types, []string{"audio-start", "audio-chunk", "audio-stop", "synthesize-stopped"}) || audio != 2*len(want) {
+		t.Fatalf("%v, %d bytes", types, audio)
+	}
+}
+
+func TestSayFailure(t *testing.T) {
+	dist = t.TempDir() // no say here
+	types, _ := exchange(t, []string{`{"type":"synthesize","data":{"text":"hi"}}`}, "audio-stop")
+	if !slices.Equal(types, []string{"error"}) {
+		t.Fatal(types)
 	}
 }

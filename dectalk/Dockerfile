@@ -1,7 +1,7 @@
 # Build DECtalk from the community source (dectalk/dectalk)
 FROM debian:bookworm-slim AS dectalk
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential autoconf automake libtool git ca-certificates \
+      build-essential autoconf automake libtool pkg-config git ca-certificates \
       libasound2-dev libpulse-dev \
  && git clone --depth 1 https://github.com/dectalk/dectalk /src \
  && cd /src/src && ./autogen.sh && ./configure && make -j"$(nproc)" \
