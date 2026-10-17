@@ -1,0 +1,103 @@
+blueprint:
+  name: Retrotalk - attention announcement
+  description: >-
+    A button (on a dashboard, a remote, or a voice command) that plays an attention chime and
+    a message: "Dinner is ready", "Everyone to the car", "Movie starts in five minutes".
+    Optionally a priority announcement that ignores the mute switch and quiet hours, at a
+    set volume. Speaks through your Retrotalk announce script.
+  domain: automation
+  source_url: https://github.com/Tom-Neverwinter/retrotalk-wyoming/blob/main/blueprints/automation/retrotalk_attention.yaml
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    button:
+      name: Button
+      description: An input_button helper (Settings → Devices & services → Helpers) or a button.
+      selector:
+        entity:
+          filter:
+            - domain: input_button
+            - domain: button
+    message:
+      name: Message
+      default: Dinner is ready.
+      selector:
+        text:
+    chime:
+      name: Chime
+      default: "[:tone 880,150][:tone 660,150][:tone 880,250]"
+      selector:
+        select:
+          options:
+            - label: Three-tone attention
+              value: "[:tone 880,150][:tone 660,150][:tone 880,250]"
+            - label: Doorbell
+              value: "[:tone 1319,250][:tone 1047,400]"
+            - label: Rising alert
+              value: "[:tone 660,120][:tone 880,120][:tone 1175,250]"
+            - label: Single ding
+              value: "[:tone 1047,300]"
+            - label: None
+              value: ""
+    priority:
+      name: Priority
+      description: Play even when muted or during quiet hours.
+      default: false
+      selector:
+        boolean:
+    volume:
+      name: Volume
+      description: Volume for this announcement, then restored. 0 = keep the current volume.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+    announce_script:
+      name: Announce script
+      description: The script you created from the Retrotalk announce blueprint.
+      selector:
+        entity:
+          filter:
+            domain: script
+    voice:
+      name: Voice
+      description: Retrotalk voice, e.g. glados. Empty = the add-on's default.
+      default: ""
+      selector:
+        text:
+    areas:
+      name: Rooms
+      description: Only these rooms. Empty = every room.
+      default: []
+      selector:
+        area:
+          multiple: true
+
+mode: single
+max_exceeded: silent
+
+triggers:
+  - trigger: state
+    entity_id: !input button
+    not_to:
+      - unavailable
+      - unknown
+
+variables:
+  chime: !input chime
+  message: !input message
+  volume: !input volume
+
+actions:
+  - action: script.turn_on
+    target:
+      entity_id: !input announce_script
+    data:
+      variables:
+        message: "{{ chime }} {{ message }}"
+        priority: !input priority
+        volume: "{{ volume if volume | int(0) > 0 else none }}"
+        voice: !input voice
+        areas: !input areas

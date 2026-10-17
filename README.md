@@ -34,6 +34,8 @@ Assistant machine: no cloud, no internet, no external programs.
 - Auto-discovered by Home Assistant's Wyoming integration
 - **Announce blueprint:** speak everywhere, in chosen rooms, or on chosen speakers, with one
   designated speaker per room, plus mute switch, quiet hours, priority alerts and volume
+- **Ready-made automations:** mail arrived, appointment reminders, an attention button, and
+  laundry or dishes done (smart plug or vibration sensor)
 
 ## Install
 
@@ -45,6 +47,22 @@ Assistant machine: no cloud, no internet, no external programs.
 
 Full docs (options, making custom voices, announcements) are in
 [`retrotalk/DOCS.md`](retrotalk/DOCS.md), which is also the add-on's **Documentation** tab.
+
+## Ready-made automation blueprints
+
+These automation blueprints use your announce script (from the [announce blueprint](blueprints/script/retrotalk_announce.yaml)), so its rooms, mute switch,
+quiet hours and volume handling apply to all of them. Create the announce script first, then
+import the ones you want:
+
+| Blueprint | Import | Triggered by | Says |
+|---|---|---|---|
+| **Mail arrived** | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FTom-Neverwinter%2Fretrotalk-wyoming%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fretrotalk_mail.yaml) | A mailbox contact/tilt/vibration sensor opens | Two-tone chime, then "The mail has arrived." Ignores further openings for 30 minutes. |
+| **Appointment reminder** | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FTom-Neverwinter%2Fretrotalk-wyoming%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fretrotalk_appointment.yaml) | A calendar event is about to start | "Reminder: Dentist starts in 15 minutes, at Main Street Clinic." Skips all-day events. |
+| **Attention announcement** | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FTom-Neverwinter%2Fretrotalk-wyoming%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fretrotalk_attention.yaml) | A button (dashboard, remote, voice) | Chime + your message ("Dinner is ready"), optional priority and volume. |
+| **Laundry or dishes done** | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FTom-Neverwinter%2Fretrotalk-wyoming%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fretrotalk_appliance_done.yaml) | A power plug or vibration sensor goes quiet | "The washing machine has finished." Waits a few quiet minutes so mid-cycle pauses don't count. |
+
+Each takes a voice (try `jarvis` for reminders or `glados` for chores) and optional rooms.
+Messages can use any Retrotalk command, like the `[:tone ...]` chimes.
 
 ## How the engine works
 
@@ -83,6 +101,7 @@ models. It's understandable, and very retro.
 | `retrotalk/translations/en.yaml` | UI labels for the options |
 | `retrotalk/Dockerfile` | One static binary on an empty base image |
 | `blueprints/script/retrotalk_announce.yaml` | Room/speaker announcement script blueprint |
+| `blueprints/automation/` | Ready-made automations: mail, appointments, attention, laundry/dishes |
 | `.github/workflows/ci.yaml` | Lint, unit tests, build both architectures, smoke test with the Wyoming client (WAVs uploaded as artifacts), publish images |
 
 Run the tests with `cd retrotalk && go test ./...`.

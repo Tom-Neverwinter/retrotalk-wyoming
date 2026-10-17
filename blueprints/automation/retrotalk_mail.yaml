@@ -1,0 +1,74 @@
+blueprint:
+  name: Retrotalk - mail arrived
+  description: >-
+    Announce when the mailbox is opened (a contact, tilt or vibration sensor turns on).
+    Speaks through your Retrotalk announce script, so its rooms, mute switch and quiet
+    hours apply. Further openings are ignored for a while, so collecting the mail doesn't
+    announce again.
+  domain: automation
+  source_url: https://github.com/Tom-Neverwinter/retrotalk-wyoming/blob/main/blueprints/automation/retrotalk_mail.yaml
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    mailbox_sensor:
+      name: Mailbox sensor
+      description: Turns on when the mailbox is opened.
+      selector:
+        entity:
+          filter:
+            domain: binary_sensor
+    announce_script:
+      name: Announce script
+      description: The script you created from the Retrotalk announce blueprint.
+      selector:
+        entity:
+          filter:
+            domain: script
+    message:
+      name: Message
+      description: What to say. Retrotalk commands work, like the two-tone chime.
+      default: "[:tone 1047,120][:tone 1319,220] The mail has arrived."
+      selector:
+        text:
+    voice:
+      name: Voice
+      description: Retrotalk voice, e.g. kitt or hal. Empty = the add-on's default.
+      default: ""
+      selector:
+        text:
+    areas:
+      name: Rooms
+      description: Only these rooms. Empty = every room.
+      default: []
+      selector:
+        area:
+          multiple: true
+    ignore_minutes:
+      name: Ignore further openings for
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 240
+          unit_of_measurement: min
+
+mode: single
+max_exceeded: silent
+
+triggers:
+  - trigger: state
+    entity_id: !input mailbox_sensor
+    from: "off"
+    to: "on"
+
+actions:
+  - action: script.turn_on
+    target:
+      entity_id: !input announce_script
+    data:
+      variables:
+        message: !input message
+        voice: !input voice
+        areas: !input areas
+  - delay:
+      minutes: !input ignore_minutes

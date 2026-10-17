@@ -1,0 +1,94 @@
+blueprint:
+  name: Retrotalk - appointment reminder
+  description: >-
+    Read out upcoming calendar events: "Reminder: dentist starts in 15 minutes, at Main
+    Street Clinic." Works with any calendar in Home Assistant (local, Google, CalDAV...).
+    All-day events are skipped. Speaks through your Retrotalk announce script.
+  domain: automation
+  source_url: https://github.com/Tom-Neverwinter/retrotalk-wyoming/blob/main/blueprints/automation/retrotalk_appointment.yaml
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    calendar:
+      name: Calendar
+      selector:
+        entity:
+          filter:
+            domain: calendar
+    lead:
+      name: Remind
+      default: "-0:15:00"
+      selector:
+        select:
+          options:
+            - label: When it starts
+              value: "-0:00:00"
+            - label: 5 minutes before
+              value: "-0:05:00"
+            - label: 15 minutes before
+              value: "-0:15:00"
+            - label: 30 minutes before
+              value: "-0:30:00"
+            - label: 1 hour before
+              value: "-1:00:00"
+    include_location:
+      name: Say the location
+      default: true
+      selector:
+        boolean:
+    announce_script:
+      name: Announce script
+      description: The script you created from the Retrotalk announce blueprint.
+      selector:
+        entity:
+          filter:
+            domain: script
+    voice:
+      name: Voice
+      description: Retrotalk voice, e.g. jarvis. Empty = the add-on's default.
+      default: ""
+      selector:
+        text:
+    areas:
+      name: Rooms
+      description: Only these rooms. Empty = every room.
+      default: []
+      selector:
+        area:
+          multiple: true
+
+mode: queued
+max: 10
+
+triggers:
+  - trigger: calendar
+    event: start
+    entity_id: !input calendar
+    offset: !input lead
+
+variables:
+  lead: !input lead
+  include_location: !input include_location
+  message: >-
+    {% set parts = lead.lstrip('-').split(':') %}
+    {% set minutes = parts[0] | int * 60 + parts[1] | int %}
+    {% set e = trigger.calendar_event %}
+    Reminder: {{ e.summary }}
+    {%- if minutes == 0 %} is starting now
+    {%- elif minutes == 60 %} starts in one hour
+    {%- else %} starts in {{ minutes }} minutes{% endif %}
+    {%- if include_location and e.location %}, at {{ e.location }}{% endif %}.
+
+conditions:
+  - condition: template
+    value_template: "{{ not trigger.calendar_event.all_day }}"
+
+actions:
+  - action: script.turn_on
+    target:
+      entity_id: !input announce_script
+    data:
+      variables:
+        message: "{{ message }}"
+        voice: !input voice
+        areas: !input areas
