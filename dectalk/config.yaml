@@ -9,7 +9,6 @@ arch:
   - aarch64
 init: false
 startup: services
-boot: auto
 discovery:
   - wyoming
 ports:
