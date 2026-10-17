@@ -7,15 +7,14 @@
 
 [![CI](https://github.com/Tom-Neverwinter/retrotalk-wyoming/actions/workflows/ci.yaml/badge.svg)](https://github.com/Tom-Neverwinter/retrotalk-wyoming/actions/workflows/ci.yaml)
 ![Version](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fraw.githubusercontent.com%2FTom-Neverwinter%2Fretrotalk-wyoming%2Fmain%2Fretrotalk%2Fconfig.yaml&query=%24.version&label=version)
-![Project stage: experimental](https://img.shields.io/badge/project%20stage-experimental-orange)
+![Status: working](https://img.shields.io/badge/status-working-brightgreen)
 ![Supports aarch64](https://img.shields.io/badge/aarch64-yes-green)
 ![Supports amd64](https://img.shields.io/badge/amd64-yes-green)
 ![Wyoming protocol](https://img.shields.io/badge/wyoming-TTS%20%2B%20streaming-blue)
 [![License](https://img.shields.io/github/license/Tom-Neverwinter/retrotalk-wyoming?cacheSeconds=3600)](LICENSE)
 
-> **🚧 Work in progress.** The engine is new and still being tuned. It runs on a Raspberry Pi 4
-> with Home Assistant 2026.10, but the announce blueprint hasn't been tried on real speakers yet.
-> Issues and PRs welcome.
+> **✅ Working.** Running daily on a Raspberry Pi 4 with Home Assistant 2026.10 and announcing on
+> real speakers (Sonos). The engine is still being tuned (French is experimental). Issues and PRs welcome.
 
 Retrotalk is a local text-to-speech add-on with the robotic charm of 1980s formant
 synthesizers. The speech engine is written from scratch in Go and runs entirely on your Home
@@ -135,9 +134,10 @@ Run the tests with `cd retrotalk && go test ./...`.
 - [x] Announce blueprint: all / areas / speakers, mute switch, quiet hours, priority, volume
 - [x] CI: lint, race detector, fuzzing, amd64 and aarch64 builds, smoke test, prebuilt images
 - [x] Hardened against hostile input and misbehaving clients (0.7.1)
-- [x] Installed on a Raspberry Pi 4 with Home Assistant 2026.10.2 (0.6.0): prebuilt image
+- [x] Installed on a Raspberry Pi 4 with Home Assistant 2026.10.2 (0.7.1, auto-updating): prebuilt image
   installs in seconds, auto-discovery, speech generated through `tts.retrotalk`
-- [x] Announce blueprint verified on a real speaker (Sonos): plays, then restores the previous volume
+- [x] Announce blueprint verified on a real speaker (Sonos): plays, then restores the previous volume;
+  configurable wake-up lead-in for speakers that clip the first words
 - [ ] French: still experimental (about half of words misrecognized)
 - [ ] Hardest remaining sounds: th (heard as f), ch/jh, the -ing ending
 

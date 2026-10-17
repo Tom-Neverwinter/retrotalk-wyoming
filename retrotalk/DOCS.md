@@ -1,6 +1,6 @@
 # Retrotalk TTS
 
-> 🚧 Work in progress. See the [repository](https://github.com/Tom-Neverwinter/retrotalk-wyoming)
+> ✅ Working, still being tuned. See the [repository](https://github.com/Tom-Neverwinter/retrotalk-wyoming)
 > for status.
 
 Retrotalk is a local, retro-sounding text-to-speech engine in the style of 1980s formant
