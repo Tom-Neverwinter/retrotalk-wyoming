@@ -65,7 +65,7 @@ Run the tests with `cd dectalk && go test ./...`.
 - [x] DECtalk builds and speaks on amd64 and aarch64 (CI smoke test with real DECtalk)
 - [ ] Verified on a Raspberry Pi 4 running Home Assistant
 - [ ] Verified discovery and blueprint on a live Home Assistant
-- [ ] Prebuilt images (currently builds on your device)
+- [ ] Prebuilt images: on hold, DECtalk's licence is proprietary (see Licensing)
 - [x] Pin the DECtalk source to a known-good commit (`DECTALK_REF` build arg)
 - [x] Streaming audio out (no temp files) and streaming text in (`synthesize-start` / `synthesize-chunk`)
 - [x] Bundled `kitt` (default) and `hal` impression voices
@@ -78,5 +78,7 @@ Run the tests with `cd dectalk && go test ./...`.
 
 The add-on code in this repo is MIT licensed (see `LICENSE`). **DECtalk itself is not part of
 this repo.** It is downloaded and compiled from [dectalk/dectalk](https://github.com/dectalk/dectalk)
-when you install the add-on, and its licensing status is unclear. Check it before redistributing
-built images.
+on your device when you install the add-on. Its
+[LICENCE](https://github.com/dectalk/dectalk/blob/develop/LICENCE) is proprietary (FONIX
+Corporation, all rights reserved), so this project does not publish prebuilt images containing
+DECtalk. Make sure your use is acceptable to you.

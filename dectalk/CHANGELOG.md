@@ -6,7 +6,8 @@
   (`paul_gr`, `betty_fr`, ...), enabled in the Configuration tab; custom voices take a language
 - Announce blueprint: mute switch, quiet hours, priority override, per-announcement volume
   with restore, and queued announcements that wait for each other instead of overlapping
-- CI builds and smoke-tests real DECtalk on amd64 and aarch64 for every change
+- CI builds and smoke-tests real DECtalk on amd64 and aarch64 for every change (images are
+  not published because DECtalk's licence is proprietary)
 
 ## 0.4.1
 
