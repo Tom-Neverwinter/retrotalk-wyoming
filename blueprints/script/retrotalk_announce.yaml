@@ -171,15 +171,12 @@ sequence:
       message: "{{ ('[:pause ' ~ wake_ms | int ~ '] ') if wake_ms | int > 0 else '' }}{{ message }}"
       options: "{{ {'voice': voice} if voice | default('') else {} }}"
   # Wait for playback to finish (bounded) so volume restore and the next announcement don't cut it off.
-  # Some speakers (Sonos) take a few seconds to report "playing"; wait for it to start first,
-  # and if it never does, allow roughly the message's speaking time (~12 characters a second).
+  # Speakers can be slow to report "playing", and Sonos never does for announcements. Wait up
+  # to about the message's speaking time (~12 characters a second) for playback to start;
+  # if it does start, then wait for it to end.
   - wait_template: "{{ players | select('is_state', 'playing') | list | count > 0 }}"
     timeout:
-      seconds: 8
-  - if: "{{ not wait.completed }}"
-    then:
-      - delay:
-          seconds: "{{ 1 + (message | length / 12) | int }}"
+      seconds: "{{ 2 + wake_ms | int / 1000 + (message | length / 12) | int }}"
   - wait_template: "{{ players | select('is_state', 'playing') | list | count == 0 }}"
     timeout:
       seconds: "{{ max_seconds }}"

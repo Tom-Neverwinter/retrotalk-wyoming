@@ -4,8 +4,8 @@
 
 - New "Speaker wake-up lead-in" (default 1000 ms): silence before each announcement, so
   speakers that wake slowly (Sonos) no longer cut off the first words.
-- The volume is restored only after playback has really started and finished; before, a
-  speaker slow to report "playing" got its volume restored mid-announcement.
+- The volume is restored only after the announcement has had time to play (or, on speakers
+  that report it, after playback ends); before, a speaker slow to report "playing" got its volume restored mid-announcement.
   Re-import the blueprint to get it.
 
 ## 0.7.1
