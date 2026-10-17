@@ -1,5 +1,5 @@
 name: Retrotalk TTS
-version: "0.7.0"
+version: "0.7.1"
 slug: retrotalk
 description: Retro formant text-to-speech in six languages (our own engine) as a Wyoming server
 url: https://github.com/Tom-Neverwinter/retrotalk-wyoming

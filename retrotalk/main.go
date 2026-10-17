@@ -24,10 +24,20 @@ import (
 const (
 	maxDataLength = 1 << 20            // client-supplied JSON is tiny; refuse anything absurd
 	maxHeaderLine = 64 << 10           // bufio buffer size = longest header line accepted
+	maxConns      = 32                 // concurrent connections; more are closed at once
+	maxPending    = 2000               // streamed text held while waiting for punctuation
 	chunkBytes    = tts.SampleRate * 2 // send audio in chunks of at most 1 s
 )
 
 var format = map[string]int{"rate": tts.SampleRate, "width": 2, "channels": 1}
+
+// Timeouts drop clients that stop sending or stop reading, so they can't hold a connection
+// (and its buffers) forever. Variables so tests can shorten them.
+var (
+	firstTimeout = 10 * time.Second // Home Assistant asks right after connecting
+	idleTimeout  = 2 * time.Minute  // between events of a stream (an LLM may pause)
+	writeTimeout = 30 * time.Second
+)
 
 // voice is a named speaker: a built-in preset plus optional settings, rate and language.
 type voice struct {
@@ -198,12 +208,14 @@ func writeEvent(w *bufio.Writer, typ string, data any, payload []byte) {
 }
 
 type conn struct {
+	nc      net.Conn
 	w       *bufio.Writer
 	started bool // audio-start sent for the current message
 }
 
 func (c *conn) send(typ string, data any, payload []byte) error {
 	writeEvent(c.w, typ, data, payload)
+	c.nc.SetWriteDeadline(time.Now().Add(writeTimeout))
 	return c.w.Flush()
 }
 
@@ -292,11 +304,19 @@ func (s *server) voice(req synthReq) voice {
 
 func (s *server) handle(nc net.Conn) {
 	defer nc.Close()
-	c := &conn{w: bufio.NewWriter(nc)}
+	defer func() { // one bad message must not take the whole add-on down
+		if r := recover(); r != nil {
+			log.Printf("%s: recovered from panic: %v", nc.RemoteAddr(), r)
+		}
+	}()
+	c := &conn{nc: nc, w: bufio.NewWriter(nc)}
 	r := bufio.NewReaderSize(nc, maxHeaderLine)
 	var stream *tts.Session // set between synthesize-start and synthesize-stop
 	var pending string      // streamed text not yet ending a phrase
+	wait := firstTimeout    // silent connections can't hold one of the few slots for long
 	for {
+		nc.SetReadDeadline(time.Now().Add(wait))
+		wait = idleTimeout
 		typ, data, err := readEvent(r)
 		if err == nil {
 			var req synthReq
@@ -322,6 +342,13 @@ func (s *server) handle(nc net.Conn) {
 					// Speak each completed phrase as soon as it arrives.
 					var done string
 					done, pending = tts.SplitPhrases(pending + req.Text)
+					if len(pending) > maxPending { // no punctuation in sight: speak up to a space
+						cut := strings.LastIndexByte(pending[:maxPending], ' ') + 1
+						if cut == 0 {
+							cut = maxPending
+						}
+						done, pending = done+pending[:cut], pending[cut:]
+					}
 					err = c.speak(stream, done)
 				}
 			case "synthesize-stop":
@@ -334,6 +361,15 @@ func (s *server) handle(nc net.Conn) {
 				if err == nil {
 					err = c.send("synthesize-stopped", map[string]any{}, nil)
 				}
+			}
+		}
+		if errors.Is(err, tts.ErrTooLong) {
+			// Over-long message: what was spoken so far is delivered; end it normally.
+			log.Printf("%s: %v", nc.RemoteAddr(), err)
+			if typ == "synthesize" {
+				err = c.send("audio-stop", map[string]any{}, nil)
+			} else {
+				err = nil // keep the stream open; further text is ignored by the spent session
 			}
 		}
 		if err != nil {
@@ -389,12 +425,22 @@ func main() {
 	}
 	log.Printf("Wyoming TTS server on %s, %d voices, default %q, %d pronunciations", ln.Addr(), len(vs), def.Name, len(lexicon))
 	go discover(port)
+	slots := make(chan struct{}, maxConns)
 	for {
 		c, err := ln.Accept()
 		if err != nil {
 			log.Print(err)
 			continue
 		}
-		go s.handle(c)
+		select {
+		case slots <- struct{}{}:
+			go func() {
+				defer func() { <-slots }()
+				s.handle(c)
+			}()
+		default:
+			log.Printf("%s: too many connections, closing", c.RemoteAddr())
+			c.Close()
+		}
 	}
 }

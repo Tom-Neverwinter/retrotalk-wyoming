@@ -109,6 +109,13 @@ func normalize(s string) string {
 	return s
 }
 
+// Limits that keep hostile or runaway text bounded: no real word is longer than 40 letters,
+// and 40 words without punctuation is a long breath anyway.
+const (
+	maxWordLen     = 40
+	maxPhraseWords = 40
+)
+
 // punctNames are spoken in [:punct all] mode.
 var punctNames = map[byte]string{'.': "period", ',': "comma", ';': "semicolon", ':': "colon",
 	'!': "exclamation point", '?': "question mark"}
@@ -122,7 +129,14 @@ func phrases(s string, readPunct bool, L *language) []phrase {
 	afterAbbrev := false // "Dr." : that period isn't a sentence end
 	add := func(ws ...string) {
 		for _, w := range ws {
+			if r := []rune(w); len(r) > maxWordLen {
+				w = string(r[:maxWordLen])
+			}
 			cur.words = append(cur.words, word{text: w, emph: emph})
+			if len(cur.words) >= maxPhraseWords { // long unpunctuated run: breathe
+				out = append(out, cur)
+				cur = phrase{}
+			}
 		}
 	}
 	for _, tok := range reToken.FindAllString(s, -1) {

@@ -1,6 +1,7 @@
 package tts
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -34,9 +35,30 @@ type Speaker struct {
 // Session speaks a sequence of texts, keeping command state (voice, modes) between calls:
 // a stream of text chunks is one Session.
 type Session struct {
-	sp *Speaker
-	st state
+	sp    *Speaker
+	st    state
+	spent int // bytes of audio emitted so far, against maxAudio
 }
+
+// emit passes audio on while the session is within its budget.
+func (s *Session) emit(pcm []byte, out func([]byte) error) error {
+	if s.spent+len(pcm) > maxAudio {
+		return ErrTooLong
+	}
+	s.spent += len(pcm)
+	return out(pcm)
+}
+
+// Limits on what one session (one message or one stream) may produce.
+const (
+	maxPhonemeMs = 3000    // longest phonemic-input duration (a long sung note)
+	maxDialKeys  = 64      // [:dial] digits
+	maxAudioSecs = 10 * 60 // total audio per session
+	maxAudio     = maxAudioSecs * SampleRate * 2
+)
+
+// ErrTooLong stops a session that has produced its maximum amount of audio.
+var ErrTooLong = errors.New("message too long: more than 10 minutes of audio")
 
 type state struct {
 	v                 Voice
@@ -67,10 +89,8 @@ func (s *Session) Speak(text string, emit func(pcm []byte) error) error {
 			continue
 		}
 		if strings.HasPrefix(strings.TrimSpace(part.s), ":") {
-			if pcm := s.command(part.s); len(pcm) > 0 {
-				if err := emit(pcm); err != nil {
-					return err
-				}
+			if err := s.command(part.s, emit); err != nil {
+				return err
 			}
 			continue
 		}
@@ -131,13 +151,14 @@ func (s *Session) speakPhrase(ph phrase, pauseMs float64, emit func([]byte) erro
 		return nil
 	}
 	timeAndPitch(segs, ph.end, v, L)
-	return emit(newSynth(v).render(frames(segs, pauseMs, v, L.aspirate)))
+	return s.emit(newSynth(v).render(frames(segs, pauseMs, v, L.aspirate)), emit)
 }
 
-// command applies one bracket of commands; tones and pauses come back as audio.
-func (s *Session) command(body string) []byte {
-	var pcm []byte
+// command applies one bracket of commands; tones and pauses are emitted one at a time, so a
+// bracket of many tones never sits in memory at once.
+func (s *Session) command(body string, emit func([]byte) error) error {
 	for _, c := range strings.Split(body, ":")[1:] {
+		var pcm []byte
 		f := strings.Fields(strings.ReplaceAll(c, ",", " "))
 		if len(f) == 0 {
 			continue
@@ -179,10 +200,16 @@ func (s *Session) command(body string) []byte {
 				s.st.v.Lang = tag
 			}
 		case name == "dial" && len(f) > 1:
-			pcm = append(pcm, dial(strings.Join(f[1:], ""))...)
+			keys := strings.Join(f[1:], "")
+			pcm = append(pcm, dial(keys[:min(len(keys), maxDialKeys)])...)
+		}
+		if len(pcm) > 0 {
+			if err := s.emit(pcm, emit); err != nil {
+				return err
+			}
 		}
 	}
-	return pcm
+	return nil
 }
 
 // shortNames are DECtalk's two-letter voice commands ([:np] = paul, ...).
@@ -329,6 +356,7 @@ func parsePhonemes(s string) (word, bool) {
 			}
 			parts := strings.Split(s[i+1:i+j], ",")
 			dur, _ = strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+			dur = clamp(dur, 0, maxPhonemeMs)
 			if len(parts) > 1 {
 				note, _ := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
 				if note >= 1 && note <= 37 {

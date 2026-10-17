@@ -34,36 +34,43 @@ func TestPhonemicInput(t *testing.T) {
 	}
 }
 
+// run applies a command bracket and returns the audio it produced.
+func run(s *Session, body string) []byte {
+	var pcm []byte
+	s.command(body, func(b []byte) error { pcm = append(pcm, b...); return nil })
+	return pcm
+}
+
 func TestCommands(t *testing.T) {
 	sp := &Speaker{Voices: map[string]Voice{"hal": {Pitch: 85, PitchRange: 100, HeadSize: 96, Rate: 235}}}
 	s := sp.Session(Presets["paul"])
-	s.command(":rate 250 :volume 100 :cp 300 :pp 900 :punct all")
+	run(s, ":rate 250 :volume 100 :cp 300 :pp 900 :punct all")
 	if s.st.v.Rate != 250 || math.Abs(s.st.v.Loud-6.02) > 0.1 || s.st.commaMs != 300 || s.st.periodMs != 900 || s.st.punct != "all" {
 		t.Fatalf("state %+v", s.st)
 	}
-	s.command(":name hal")
+	run(s, ":name hal")
 	if s.st.v.Pitch != 85 {
 		t.Fatalf("custom voice not selected: %+v", s.st.v)
 	}
-	s.command(":nb")
+	run(s, ":nb")
 	if s.st.v.Pitch != Presets["betty"].Pitch {
 		t.Fatal("[:nb] should select betty")
 	}
-	s.command(":dv ap 150 pq 50")
+	run(s, ":dv ap 150 pq 50")
 	if s.st.v.Pitch != 150 || s.st.v.Steps != 50 {
 		t.Fatalf("dv: %+v", s.st.v)
 	}
-	s.command(":mode spell on")
+	run(s, ":mode spell on")
 	if !s.st.spell {
 		t.Fatal("spell mode")
 	}
-	if got := len(s.command(":tone 440,500")); got != 2*8000 {
+	if got := len(run(s, ":tone 440,500")); got != 2*8000 {
 		t.Fatalf("tone: %d bytes", got)
 	}
-	if got := len(s.command(":dial 55")); got != 2*2*(1600+960) {
+	if got := len(run(s, ":dial 55")); got != 2*2*(1600+960) {
 		t.Fatalf("dial: %d bytes", got)
 	}
-	if got := len(s.command(":pause 250")); got != 2*4000 {
+	if got := len(run(s, ":pause 250")); got != 2*4000 {
 		t.Fatalf("pause: %d bytes", got)
 	}
 }

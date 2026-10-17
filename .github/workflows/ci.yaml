@@ -22,8 +22,14 @@ jobs:
         with:
           go-version-file: retrotalk/go.mod
           cache-dependency-path: retrotalk/go.mod
-      - run: go vet ./... && go test ./...
+      - run: go vet ./... && go test -race ./...
         working-directory: retrotalk
+      - name: Fuzz (short)
+        working-directory: retrotalk
+        run: |
+          go test -run '^$' -fuzz '^FuzzSpeak$' -fuzztime 20s ./tts
+          go test -run '^$' -fuzz '^FuzzParsePhonemes$' -fuzztime 20s ./tts
+          go test -run '^$' -fuzz '^FuzzReadEvent$' -fuzztime 20s .
 
   build:
     name: Build and smoke test (${{ matrix.arch }})

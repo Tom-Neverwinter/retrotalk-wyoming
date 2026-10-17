@@ -238,7 +238,9 @@ func normalizeOther(s string, sp *spellout, w otherWords) string {
 		if found {
 			var d []string
 			for _, c := range frac {
-				d = append(d, sp.units[c-'0'])
+				if c >= '0' && c <= '9' { // "1..2" or "1,,5": skip the stray separators
+					d = append(d, sp.units[c-'0'])
+				}
 			}
 			out += " " + w.point + " " + strings.Join(d, " ")
 		}
@@ -296,6 +298,17 @@ func stressNucleus(ph []string, idx int) []string {
 }
 
 func clamp2(x, lo, hi int) int { return max(lo, min(hi, x)) }
+
+// hasRunes reports whether r[i:] starts with p, without copying the rest of the word.
+func hasRunes(r []rune, i int, p string) bool {
+	for _, c := range p {
+		if i >= len(r) || r[i] != c {
+			return false
+		}
+		i++
+	}
+	return true
+}
 
 // spanishG2P: Spanish spelling is close to phonemic; stress falls on the accented vowel, else
 // on the penultimate syllable for words ending in a vowel, n or s, else on the last.
@@ -424,7 +437,7 @@ func germanG2P(w string) []string {
 		return 0
 	}
 	isV := func(c rune) bool { return strings.ContainsRune("aeiouäöüy", c) }
-	has := func(i int, s string) bool { return strings.HasPrefix(string(r[min(i, len(r)):]), s) }
+	has := func(i int, s string) bool { return hasRunes(r, i, s) }
 	// short vowel: followed by two or more consonants (or ck, tz, ss).
 	short := func(i int) bool {
 		a, b := at(i+1), at(i+2)
@@ -591,7 +604,7 @@ func frenchG2P(w string) []string {
 		return 0
 	}
 	isV := func(c rune) bool { return strings.ContainsRune("aeiouyàâéèêëîïôûùœ", c) }
-	has := func(i int, p string) bool { return strings.HasPrefix(string(r[min(i, len(r)):]), p) }
+	has := func(i int, p string) bool { return hasRunes(r, i, p) }
 	nasal := func(i int) bool { // n/m at i closes a nasal vowel (not before a vowel or doubled)
 		c, n := at(i), at(i+1)
 		return (c == 'n' || c == 'm') && !isV(n) && n != 'n' && n != 'm'

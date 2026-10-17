@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -10,6 +12,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/Tom-Neverwinter/retrotalk-wyoming/tts"
 )
 
 func writeOptions(t *testing.T, opts string) string {
@@ -184,5 +189,75 @@ func TestStreamingKeepsCommandState(t *testing.T) {
 	}
 	if normal, fast := stream(""), stream("[:rate 400] "); float64(fast) > 0.7*float64(normal) {
 		t.Fatalf("rate did not carry over: %d vs %d bytes", fast, normal)
+	}
+}
+
+// FuzzReadEvent: arbitrary bytes off the wire never panic the protocol reader.
+//
+//	go test -fuzz FuzzReadEvent -fuzztime 60s .
+func FuzzReadEvent(f *testing.F) {
+	for _, seed := range []string{
+		`{"type":"describe"}` + "\n",
+		`{"type":"synthesize","data_length":2}` + "\n{}",
+		`{"type":"x","data_length":-1,"payload_length":-9}` + "\n",
+		`{"type":"x","payload_length":99999999999}` + "\n",
+		`{"type":"synthesize","data":{"text":7,"voice":"paul"}}` + "\n",
+		"\n\n\n", `{"type":`,
+	} {
+		f.Add([]byte(seed))
+	}
+	f.Fuzz(func(t *testing.T, b []byte) {
+		r := bufio.NewReaderSize(bytes.NewReader(b), maxHeaderLine)
+		for i := 0; i < 100; i++ {
+			typ, data, err := readEvent(r)
+			if err != nil {
+				return
+			}
+			if typ == "synthesize" || typ == "synthesize-chunk" {
+				decode(data) // must not panic on any JSON shape
+			}
+		}
+	})
+}
+
+// A client that connects and says nothing is dropped, freeing its connection slot.
+func TestSilentClientDropped(t *testing.T) {
+	old := firstTimeout
+	firstTimeout = 100 * time.Millisecond
+	defer func() { firstTimeout = old }()
+	vs, def, _ := loadVoices("")
+	client, server := net.Pipe()
+	done := make(chan struct{})
+	go func() { newServer(vs, def, nil).handle(server); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("silent connection was not dropped")
+	}
+	client.Close()
+}
+
+// Streamed text with no punctuation is still spoken as it arrives, not buffered forever.
+func TestUnpunctuatedStreamIsSpoken(t *testing.T) {
+	vs, def, _ := loadVoices("")
+	client, server := net.Pipe()
+	go newServer(vs, def, nil).handle(server)
+	defer client.Close()
+	chunk := `{"type":"synthesize-chunk","data":{"text":"` + strings.Repeat("door ", 1000) + `"}}` + "\n"
+	go client.Write([]byte(`{"type":"synthesize-start"}` + "\n" + chunk))
+	if ev := readReply(t, bufio.NewReader(client)); ev.Type != "audio-start" {
+		t.Fatalf("got %q before the stream ended, want audio-start", ev.Type)
+	}
+}
+
+// A message longer than the audio budget ends with audio-stop instead of a dropped connection.
+func TestOverlongMessageEndsCleanly(t *testing.T) {
+	// Far more than 10 minutes of text, sent as Home Assistant does: a separate data block
+	// (headers are capped at 64 kB). exchange appends a newline, counted in data_length.
+	data := `{"text":"` + strings.Repeat("The front door is open. ", 6000) + `"}`
+	header := fmt.Sprintf(`{"type":"synthesize","data_length":%d}`, len(data)+1)
+	types, audio := exchange(t, []string{header + "\n" + data}, "audio-stop")
+	if !slices.Equal(types, []string{"audio-start", "audio-chunk", "audio-stop"}) || audio > 10*60*tts.SampleRate*2 {
+		t.Fatalf("%v, %d bytes", types, audio)
 	}
 }

@@ -70,7 +70,7 @@ func TestLanguageSwitching(t *testing.T) {
 		t.Fatal("language tags")
 	}
 	s := (&Speaker{}).Session(Presets["paul"])
-	s.command(":lang sp")
+	run(s, ":lang sp")
 	if s.st.v.Lang != "es-ES" {
 		t.Fatalf("[:lang sp] -> %q", s.st.v.Lang)
 	}

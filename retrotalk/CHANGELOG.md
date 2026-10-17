@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.1
+
+Security and robustness, found by attacking the add-on on purpose:
+- Fixed a crash: a malformed amount like "$1..2" in a Spanish, German or French message
+  could take the whole add-on down. A crash in one message can no longer stop the add-on.
+- Hostile or runaway messages are bounded: sung notes up to 3 s, words up to 40 letters,
+  phrases split after 40 words, [:dial] up to 64 keys, 10 minutes of audio per message.
+  An over-long message is spoken up to the limit and then ends normally.
+- Connections: at most 32 at once; silent ones are dropped after 10 s, idle streams after
+  2 minutes, and clients that stop reading after 30 s.
+- Streamed text without punctuation is spoken as it arrives instead of piling up.
+- Tones, pauses and dial tones are sent as they are made instead of built up in memory.
+- Faster Spanish, German and French pronunciation on long words.
+- Fuzz tests and the race detector now run in CI.
+
 ## 0.7.0
 
 - **Much clearer speech.** Engine constants tuned automatically against speech recognizers,
